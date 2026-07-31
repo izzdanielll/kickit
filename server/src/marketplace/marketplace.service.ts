@@ -6,21 +6,16 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Currency, ListingStatus, Position, Rarity } from '@prisma/client';
+import { MarketplaceQueryDto } from './dto/marketplace.dto';
 
 @Injectable()
 export class MarketplaceService {
   constructor(private prisma: PrismaService) {}
 
-  async getListings(filters?: {
-    position?: Position;
-    rarity?: Rarity;
-    currency?: Currency;
-    search?: string;
-    sort?: 'price_asc' | 'price_desc' | 'recent';
-  }) {
+  async getListings(userId: string, filters: MarketplaceQueryDto) {
     if (!this.prisma.isDbConnected) {
       let listings = Array.from(this.prisma.memStore.listings.values()).filter(
-        (l) => l.status === 'ACTIVE',
+        (l) => l.status === 'ACTIVE' && l.sellerId !== userId,
       );
 
       if (filters?.currency) {
@@ -38,10 +33,14 @@ export class MarketplaceService {
           l.card.template.playerName.toLowerCase().includes(query),
         );
       }
-      return listings;
+      const start = (filters.page - 1) * filters.limit;
+      return listings.slice(start, start + filters.limit);
     }
 
-    const where: any = { status: ListingStatus.ACTIVE };
+    const where: any = {
+      status: ListingStatus.ACTIVE,
+      sellerId: { not: userId },
+    };
 
     if (filters?.currency) {
       where.currency = filters.currency;
@@ -88,6 +87,8 @@ export class MarketplaceService {
         },
       },
       orderBy,
+      skip: (filters.page - 1) * filters.limit,
+      take: filters.limit,
     });
 
     return listings;
@@ -162,10 +163,13 @@ export class MarketplaceService {
         throw new BadRequestException('Card is already locked or listed');
       }
 
-      await tx.card.update({
-        where: { id: data.cardId },
+      const lock = await tx.card.updateMany({
+        where: { id: data.cardId, ownerId: userId, isLocked: false },
         data: { isLocked: true },
       });
+      if (lock.count !== 1) {
+        throw new BadRequestException('Card is already locked or listed');
+      }
 
       const listing = await tx.marketplaceListing.create({
         data: {
@@ -235,33 +239,25 @@ export class MarketplaceService {
       const buyer = await tx.user.findUnique({ where: { id: buyerId } });
       if (!buyer) throw new NotFoundException('Buyer user not found');
 
-      if (listing.currency === Currency.COINS) {
-        if (buyer.coins < listing.price) {
-          throw new BadRequestException('Insufficient Coins');
-        }
-      } else {
-        if (buyer.gems < listing.price) {
-          throw new BadRequestException('Insufficient Gems');
-        }
-      }
-
       const taxRate = 0.05;
       const sellerEarnings = Math.floor(listing.price * (1 - taxRate));
 
       if (listing.currency === Currency.COINS) {
-        await tx.user.update({
-          where: { id: buyerId },
+        const debit = await tx.user.updateMany({
+          where: { id: buyerId, coins: { gte: listing.price } },
           data: { coins: { decrement: listing.price } },
         });
+        if (debit.count !== 1) throw new BadRequestException('Insufficient Coins');
         await tx.user.update({
           where: { id: listing.sellerId },
           data: { coins: { increment: sellerEarnings } },
         });
       } else {
-        await tx.user.update({
-          where: { id: buyerId },
+        const debit = await tx.user.updateMany({
+          where: { id: buyerId, gems: { gte: listing.price } },
           data: { gems: { decrement: listing.price } },
         });
+        if (debit.count !== 1) throw new BadRequestException('Insufficient Gems');
         await tx.user.update({
           where: { id: listing.sellerId },
           data: { gems: { increment: sellerEarnings } },
@@ -276,12 +272,19 @@ export class MarketplaceService {
         },
       });
 
-      const updatedListing = await tx.marketplaceListing.update({
-        where: { id: listingId },
+      const claimed = await tx.marketplaceListing.updateMany({
+        where: { id: listingId, status: ListingStatus.ACTIVE },
         data: {
           buyerId,
           status: ListingStatus.COMPLETED,
         },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('Listing is no longer active');
+      }
+
+      const updatedListing = await tx.marketplaceListing.findUnique({
+        where: { id: listingId },
         include: {
           card: { include: { template: true } },
         },

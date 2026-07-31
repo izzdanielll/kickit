@@ -51,6 +51,7 @@ interface PlayerCard {
   level: number;
   xp: number;
   isLocked: boolean;
+  acquiredAt?: string;
   listings?: { id: string; price: number; currency: 'COINS' | 'GEMS' }[];
 }
 
@@ -94,6 +95,43 @@ const PACK_ODDS: Record<string, { COMMON: string; RARE: string; EPIC: string; LE
   PROMO: { COMMON: '15.0%', RARE: '35.0%', EPIC: '30.0%', LEGENDARY: '15.0%', MYTHIC: '5.0%' },
 };
 
+type PlayerPosition = CardTemplate['position'];
+type CollectionSort =
+  | 'newest'
+  | 'oldest'
+  | 'ovr_desc'
+  | 'ovr_asc'
+  | 'name_asc'
+  | 'name_desc'
+  | 'level_desc'
+  | 'rarity_desc'
+  | 'rarity_asc';
+
+const FORMATION_POSITIONS: Record<string, PlayerPosition[]> = {
+  '1-2-1': ['GK', 'DEF', 'MID', 'MID', 'FWD'],
+  '2-1-1': ['GK', 'DEF', 'DEF', 'MID', 'FWD'],
+  '1-1-2': ['GK', 'DEF', 'MID', 'FWD', 'FWD'],
+};
+
+const RARITY_RANK: Record<CardTemplate['rarity'], number> = {
+  COMMON: 1,
+  RARE: 2,
+  EPIC: 3,
+  LEGENDARY: 4,
+  MYTHIC: 5,
+};
+
+const cardOverall = (card: PlayerCard) =>
+  Math.round(
+    (card.template.baseAttack +
+      card.template.baseDefense +
+      card.template.basePace +
+      card.template.basePassing +
+      card.template.basePhysical) /
+      5,
+  ) +
+  (card.level - 1);
+
 export default function DashboardPage() {
   const { user, isLoading, logout, refreshUser, updateUserCoinsGems } = useAuth();
   const router = useRouter();
@@ -110,7 +148,12 @@ export default function DashboardPage() {
   const [posFilter, setPosFilter] = useState<string>('ALL');
   const [rarityFilter, setRarityFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [collectionSort, setCollectionSort] = useState<CollectionSort>('newest');
+  const [collectionStatus, setCollectionStatus] = useState<'ALL' | 'AVAILABLE' | 'LISTED'>('ALL');
   const [marketTab, setMarketTab] = useState<'browse' | 'my-listings'>('browse');
+  const [marketNotice, setMarketNotice] = useState<string | null>(null);
+  const [cancellingListingId, setCancellingListingId] = useState<string | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Modals & Actions
   const [selectedCard, setSelectedCard] = useState<PlayerCard | null>(null);
@@ -199,22 +242,66 @@ export default function DashboardPage() {
     }
   }, [activeTab, user, fetchCollection, fetchPacks, fetchMarket, fetchSquad]);
 
+  // Keep My Club synchronized without a manual refresh control.
+  useEffect(() => {
+    if (!user || activeTab !== 'club') return;
+    const syncCollection = () => void fetchCollection();
+    const interval = window.setInterval(syncCollection, 15_000);
+    window.addEventListener('focus', syncCollection);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', syncCollection);
+    };
+  }, [activeTab, user, fetchCollection]);
+
   // Filtered Cards in Collection
   const filteredCards = useMemo(() => {
-    return cards.filter((c) => {
+    const result = cards.filter((c) => {
       if (posFilter !== 'ALL' && c.template.position !== posFilter) return false;
       if (rarityFilter !== 'ALL' && c.template.rarity !== rarityFilter) return false;
+      if (collectionStatus === 'AVAILABLE' && c.isLocked) return false;
+      if (collectionStatus === 'LISTED' && !c.isLocked) return false;
       if (searchQuery.trim()) {
-        const name = c.template.playerName.toLowerCase();
-        if (!name.includes(searchQuery.toLowerCase())) return false;
+        const query = searchQuery.trim().toLowerCase();
+        const searchable = [
+          c.template.playerName,
+          c.template.club,
+          c.template.league,
+          c.template.nationality,
+        ]
+          .join(' ')
+          .toLowerCase();
+        if (!searchable.includes(query)) return false;
       }
       return true;
     });
-  }, [cards, posFilter, rarityFilter, searchQuery]);
+    return result.sort((a, b) => {
+      if (collectionSort === 'oldest') {
+        return new Date(a.acquiredAt ?? 0).getTime() - new Date(b.acquiredAt ?? 0).getTime();
+      }
+      if (collectionSort === 'ovr_desc') return cardOverall(b) - cardOverall(a);
+      if (collectionSort === 'ovr_asc') return cardOverall(a) - cardOverall(b);
+      if (collectionSort === 'name_asc') {
+        return a.template.playerName.localeCompare(b.template.playerName);
+      }
+      if (collectionSort === 'name_desc') {
+        return b.template.playerName.localeCompare(a.template.playerName);
+      }
+      if (collectionSort === 'level_desc') return b.level - a.level;
+      if (collectionSort === 'rarity_desc') {
+        return RARITY_RANK[b.template.rarity] - RARITY_RANK[a.template.rarity];
+      }
+      if (collectionSort === 'rarity_asc') {
+        return RARITY_RANK[a.template.rarity] - RARITY_RANK[b.template.rarity];
+      }
+      return new Date(b.acquiredAt ?? 0).getTime() - new Date(a.acquiredAt ?? 0).getTime();
+    });
+  }, [cards, posFilter, rarityFilter, searchQuery, collectionSort, collectionStatus]);
 
   // Filtered Market Listings
   const filteredListings = useMemo(() => {
     return listings.filter((l) => {
+      if (l.sellerId === user?.id) return false;
       if (posFilter !== 'ALL' && l.card.template.position !== posFilter) return false;
       if (rarityFilter !== 'ALL' && l.card.template.rarity !== rarityFilter) return false;
       if (searchQuery.trim()) {
@@ -223,7 +310,7 @@ export default function DashboardPage() {
       }
       return true;
     });
-  }, [listings, posFilter, rarityFilter, searchQuery]);
+  }, [listings, posFilter, rarityFilter, searchQuery, user?.id]);
 
   // ── Actions ─────────────────────────────────────────────────
   const handleOpenPack = async (packId: string) => {
@@ -282,6 +369,11 @@ export default function DashboardPage() {
 
   const handleBuyListing = async () => {
     if (!buyingListing) return;
+    if (buyingListing.sellerId === user?.id) {
+      setBuyingListing(null);
+      alert('You cannot purchase your own listing. Use My Listings to cancel it.');
+      return;
+    }
     setIsPurchasing(true);
     try {
       const res = await fetch(`/api/marketplace/buy/${buyingListing.id}`, {
@@ -305,15 +397,36 @@ export default function DashboardPage() {
   };
 
   const handleCancelListing = async (id: string) => {
+    setCancellingListingId(id);
+    setMarketNotice(null);
     try {
       const res = await fetch(`/api/marketplace/listings/${id}`, { method: 'DELETE' });
+      const data = await res.json();
       if (res.ok) {
-        alert('Listing cancelled.');
-        void fetchMarket();
+        setMyListings((current) =>
+          current.map((listing) =>
+            listing.id === id ? { ...listing, status: 'CANCELLED' } : listing,
+          ),
+        );
+        setListings((current) => current.filter((listing) => listing.id !== id));
+        setMarketNotice('Listing cancelled successfully.');
+        await fetchMarket();
+      } else {
+        setMarketNotice(data.message || 'Unable to cancel the listing.');
       }
     } catch (e) {
-      alert('Error cancelling listing');
+      setMarketNotice('Unable to cancel the listing. Please try again.');
+    } finally {
+      setCancellingListingId(null);
     }
+  };
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    await logout();
+    router.replace('/auth?mode=login');
+    router.refresh();
   };
 
   const handleSaveSquad = async () => {
@@ -344,6 +457,18 @@ export default function DashboardPage() {
     } finally {
       setSavingSquad(false);
     }
+  };
+
+  const handleFormationChange = (formation: string) => {
+    const requiredPositions = FORMATION_POSITIONS[formation];
+    setSelectedFormation(formation);
+    setSquadSlots((current) =>
+      current.map((card, index) => {
+        if (index >= 5 || !card) return card;
+        return card.template.position === requiredPositions[index] ? card : null;
+      }),
+    );
+    setSquadNotice(null);
   };
 
   // Compute Squad Average OVR
@@ -426,7 +551,12 @@ export default function DashboardPage() {
             <b>{user.username}</b>
             <span>⌄</span>
           </button>
-          <button className="topbar-icon logout-icon" onClick={logout} aria-label="Sign out">
+          <button
+            className="topbar-icon logout-icon"
+            onClick={handleLogout}
+            disabled={isLoggingOut}
+            aria-label="Sign out"
+          >
             <LogOut size={17} />
           </button>
         </header>
@@ -461,14 +591,13 @@ export default function DashboardPage() {
           <div className="club-panel-content animate-fade-in">
             <div className="panel-header">
               <h1>My Card Collection ({filteredCards.length})</h1>
-              <button className="btn btn-ghost btn-sm" onClick={fetchCollection}>Refresh</button>
             </div>
 
             {/* Filter Bar */}
             <div className="filters-bar">
               <input
                 type="text"
-                placeholder="Search by player name..."
+                placeholder="Search player, club, league..."
                 className="filter-search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -495,19 +624,52 @@ export default function DashboardPage() {
                   </button>
                 ))}
               </div>
+              <select
+                aria-label="Filter collection status"
+                value={collectionStatus}
+                onChange={(e) =>
+                  setCollectionStatus(e.target.value as 'ALL' | 'AVAILABLE' | 'LISTED')
+                }
+                style={{
+                  background: '#111827',
+                  color: '#fff',
+                  border: '1px solid rgba(245,158,11,0.3)',
+                  borderRadius: '8px',
+                  padding: '8px 12px',
+                }}
+              >
+                <option value="ALL">All card statuses</option>
+                <option value="AVAILABLE">Available</option>
+                <option value="LISTED">Listed</option>
+              </select>
+              <select
+                aria-label="Sort card collection"
+                value={collectionSort}
+                onChange={(e) => setCollectionSort(e.target.value as CollectionSort)}
+                style={{
+                  background: '#111827',
+                  color: '#fff',
+                  border: '1px solid rgba(245,158,11,0.3)',
+                  borderRadius: '8px',
+                  padding: '8px 12px',
+                }}
+              >
+                <option value="newest">Newest acquired</option>
+                <option value="oldest">Oldest acquired</option>
+                <option value="ovr_desc">Overall: high to low</option>
+                <option value="ovr_asc">Overall: low to high</option>
+                <option value="level_desc">Level: high to low</option>
+                <option value="rarity_desc">Rarity: high to low</option>
+                <option value="rarity_asc">Rarity: low to high</option>
+                <option value="name_asc">Player: A to Z</option>
+                <option value="name_desc">Player: Z to A</option>
+              </select>
             </div>
 
             {/* Collection Grid */}
             <div className="cards-grid">
               {filteredCards.map((card) => {
-                const ovr = Math.round(
-                  (card.template.baseAttack +
-                    card.template.baseDefense +
-                    card.template.basePace +
-                    card.template.basePassing +
-                    card.template.basePhysical) /
-                    5,
-                ) + (card.level - 1);
+                const ovr = cardOverall(card);
 
                 return (
                   <div
@@ -604,6 +766,20 @@ export default function DashboardPage() {
                 </button>
               </div>
             </div>
+            {marketNotice && (
+              <div
+                role="status"
+                style={{
+                  marginBottom: '16px',
+                  padding: '10px 14px',
+                  border: '1px solid rgba(245,158,11,0.25)',
+                  borderRadius: '8px',
+                  background: 'rgba(245,158,11,0.08)',
+                }}
+              >
+                {marketNotice}
+              </div>
+            )}
 
             {marketTab === 'browse' ? (
               <>
@@ -694,8 +870,9 @@ export default function DashboardPage() {
                           <button
                             className="btn btn-ghost btn-sm"
                             onClick={() => handleCancelListing(listing.id)}
+                            disabled={cancellingListingId === listing.id}
                           >
-                            Cancel
+                            {cancellingListingId === listing.id ? 'Cancelling...' : 'Cancel'}
                           </button>
                         )}
                       </div>
@@ -719,7 +896,7 @@ export default function DashboardPage() {
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                   <select
                     value={selectedFormation}
-                    onChange={(e) => setSelectedFormation(e.target.value)}
+                    onChange={(e) => handleFormationChange(e.target.value)}
                     style={{ background: '#1e293b', color: '#fff', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)' }}
                   >
                     <option value="1-2-1">Balanced (1-2-1)</option>
@@ -749,11 +926,11 @@ export default function DashboardPage() {
                 {/* Row 1: Forward(s) */}
                 <div className="pitch-row">
                   <div className="pitch-socket filled" onClick={() => setActivePickerSlot(4)}>
-                    <span className="socket-position-label">FWD</span>
+                    <span className="socket-position-label">{FORMATION_POSITIONS[selectedFormation][4]}</span>
                     {squadSlots[4] ? (
                       <div><b>{squadSlots[4]!.template.playerName}</b></div>
                     ) : (
-                      <span>+ Select FWD</span>
+                      <span>+ Select {FORMATION_POSITIONS[selectedFormation][4]}</span>
                     )}
                   </div>
                 </div>
@@ -761,19 +938,19 @@ export default function DashboardPage() {
                 {/* Row 2: Midfielder(s) */}
                 <div className="pitch-row">
                   <div className="pitch-socket filled" onClick={() => setActivePickerSlot(2)}>
-                    <span className="socket-position-label">MID</span>
+                    <span className="socket-position-label">{FORMATION_POSITIONS[selectedFormation][2]}</span>
                     {squadSlots[2] ? (
                       <div><b>{squadSlots[2]!.template.playerName}</b></div>
                     ) : (
-                      <span>+ Select MID</span>
+                      <span>+ Select {FORMATION_POSITIONS[selectedFormation][2]}</span>
                     )}
                   </div>
                   <div className="pitch-socket filled" onClick={() => setActivePickerSlot(3)}>
-                    <span className="socket-position-label">MID</span>
+                    <span className="socket-position-label">{FORMATION_POSITIONS[selectedFormation][3]}</span>
                     {squadSlots[3] ? (
                       <div><b>{squadSlots[3]!.template.playerName}</b></div>
                     ) : (
-                      <span>+ Select MID</span>
+                      <span>+ Select {FORMATION_POSITIONS[selectedFormation][3]}</span>
                     )}
                   </div>
                 </div>
@@ -781,11 +958,11 @@ export default function DashboardPage() {
                 {/* Row 3: Defender(s) */}
                 <div className="pitch-row">
                   <div className="pitch-socket filled" onClick={() => setActivePickerSlot(1)}>
-                    <span className="socket-position-label">DEF</span>
+                    <span className="socket-position-label">{FORMATION_POSITIONS[selectedFormation][1]}</span>
                     {squadSlots[1] ? (
                       <div><b>{squadSlots[1]!.template.playerName}</b></div>
                     ) : (
-                      <span>+ Select DEF</span>
+                      <span>+ Select {FORMATION_POSITIONS[selectedFormation][1]}</span>
                     )}
                   </div>
                 </div>
@@ -793,11 +970,11 @@ export default function DashboardPage() {
                 {/* Row 4: Goalkeeper */}
                 <div className="pitch-row">
                   <div className="pitch-socket filled" onClick={() => setActivePickerSlot(0)}>
-                    <span className="socket-position-label">GK</span>
+                    <span className="socket-position-label">{FORMATION_POSITIONS[selectedFormation][0]}</span>
                     {squadSlots[0] ? (
                       <div><b>{squadSlots[0]!.template.playerName}</b></div>
                     ) : (
-                      <span>+ Select GK</span>
+                      <span>+ Select {FORMATION_POSITIONS[selectedFormation][0]}</span>
                     )}
                   </div>
                 </div>
@@ -917,10 +1094,25 @@ export default function DashboardPage() {
           <div className="modal-overlay" onClick={() => setActivePickerSlot(null)}>
             <div className="modal-card-dialog animate-fade-in" style={{ width: 'min(100%, 600px)' }} onClick={(e) => e.stopPropagation()}>
               <button className="modal-close" onClick={() => setActivePickerSlot(null)}><X size={20} /></button>
-              <h2>Select Card for Slot {activePickerSlot}</h2>
+              <h2>
+                Select {activePickerSlot < 5
+                  ? FORMATION_POSITIONS[selectedFormation][activePickerSlot]
+                  : 'Substitute'}
+              </h2>
               <div className="cards-grid" style={{ marginTop: '16px', maxHeight: '400px', overflowY: 'auto' }}>
                 {cards
-                  .filter((c) => !c.isLocked)
+                  .filter((card) => {
+                    if (card.isLocked) return false;
+                    const alreadyUsed = squadSlots.some(
+                      (selected, index) => index !== activePickerSlot && selected?.id === card.id,
+                    );
+                    if (alreadyUsed) return false;
+                    if (activePickerSlot >= 5) return true;
+                    return (
+                      card.template.position ===
+                      FORMATION_POSITIONS[selectedFormation][activePickerSlot]
+                    );
+                  })
                   .map((card) => (
                     <div
                       key={card.id}

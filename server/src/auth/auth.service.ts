@@ -149,61 +149,13 @@ export class AuthService {
 
     if (!this.prisma.isDbConnected) {
       // In-Memory Fallback
-      let user = this.prisma.memStore.users.get(email);
+      const user = this.prisma.memStore.users.get(email);
       if (!user) {
-        // Auto-create user on login for smooth testing if not registered yet
-        const passwordHash = await bcrypt.hash(dto.password, 12);
-        const userId = `usr_${Date.now()}`;
-        const username = email.split('@')[0] || 'Club Manager';
-        user = {
-          id: userId,
-          email,
-          username,
-          passwordHash,
-          coins: 500,
-          gems: 100,
-          xp: 0,
-          level: 1,
-          createdAt: new Date(),
-        };
-        this.prisma.memStore.users.set(userId, user);
-        this.prisma.memStore.users.set(email, user);
-
-        // Starter cards
-        const starterTemplates = INITIAL_TEMPLATES.filter((t) => t.rarity === 'COMMON').slice(0, 5);
-        const squadCards: any[] = [];
-
-        starterTemplates.forEach((tmpl, idx) => {
-          const cardId = `crd_start_${Date.now()}_${idx}`;
-          const cardObj = {
-            id: cardId,
-            ownerId: userId,
-            templateId: tmpl.id,
-            template: tmpl,
-            level: 1,
-            xp: 0,
-            isLocked: false,
-            listings: [],
-          };
-          this.prisma.memStore.cards.set(cardId, cardObj);
-          squadCards.push({ id: `sc_${cardId}`, slotIndex: idx, card: cardObj });
-        });
-
-        // Starter squad
-        const squadObj = {
-          id: `sqd_${userId}`,
-          name: `${username}'s XI`,
-          ownerId: userId,
-          formation: '1-2-1',
-          isActive: true,
-          squadCards,
-        };
-        this.prisma.memStore.squads.set(userId, squadObj);
-      } else {
-        const passwordValid = await bcrypt.compare(dto.password, user.passwordHash);
-        if (!passwordValid) {
-          throw new UnauthorizedException('Invalid credentials');
-        }
+        throw new UnauthorizedException('Invalid credentials');
+      }
+      const passwordValid = await bcrypt.compare(dto.password, user.passwordHash);
+      if (!passwordValid) {
+        throw new UnauthorizedException('Invalid credentials');
       }
 
       return this.buildAuthResponse(user);

@@ -1,7 +1,8 @@
-import { Controller, Get, Param, Query, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CardsService } from './cards.service';
-import { Position, Rarity } from '@prisma/client';
+import { AuthenticatedUser, CurrentUser } from '../common/auth/authenticated-user';
+import { CardQueryDto } from './dto/card-query.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('cards')
@@ -10,16 +11,14 @@ export class CardsController {
 
   @Get()
   getUserCards(
-    @Req() req: any,
-    @Query('position') position?: Position,
-    @Query('rarity') rarity?: Rarity,
-    @Query('search') search?: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: CardQueryDto,
   ) {
-    return this.cardsService.getUserCards(req.user.id, { position, rarity, search });
+    return this.cardsService.getUserCards(user.id, query);
   }
 
   @Get(':id')
-  getCardById(@Req() req: any, @Param('id') id: string) {
-    return this.cardsService.getCardById(req.user.id, id);
+  getCardById(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.cardsService.getCardById(user.id, id);
   }
 }

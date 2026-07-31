@@ -8,22 +8,18 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
 
-  // Security Headers Middleware
-  app.use((req: any, res: any, next: any) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    next();
-  });
-
   // Global prefix for all API routes
   app.setGlobalPrefix('api');
 
   // Enable CORS for the frontend
   app.enableCors({
-    origin: config.get<string>('CLIENT_URL', 'http://localhost:3000'),
+    origin: config
+      .get<string>('CLIENT_URL', 'http://localhost:3000')
+      .split(',')
+      .map((origin) => origin.trim()),
     credentials: true,
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type'],
   });
 
   // Cookie parser for JWT refresh tokens
@@ -35,12 +31,14 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      stopAtFirstError: true,
     }),
   );
 
   const port = config.get<number>('PORT', 3001);
+  app.enableShutdownHooks();
   await app.listen(port);
   console.log(`🚀 kickIt API running on http://localhost:${port}/api`);
 }
 
-bootstrap();
+void bootstrap();

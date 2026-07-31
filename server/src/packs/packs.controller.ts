@@ -1,13 +1,9 @@
-import { Controller, Get, Post, Body, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PacksService } from './packs.service';
-import { IsNotEmpty, IsString } from 'class-validator';
-
-export class OpenPackDto {
-  @IsString()
-  @IsNotEmpty()
-  packId: string;
-}
+import { AuthenticatedUser, CurrentUser } from '../common/auth/authenticated-user';
+import { OpenPackDto } from './dto/open-pack.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('packs')
@@ -20,7 +16,8 @@ export class PacksController {
   }
 
   @Post('open')
-  openPack(@Req() req: any, @Body() dto: OpenPackDto) {
-    return this.packsService.openPack(req.user.id, dto.packId);
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  openPack(@CurrentUser() user: AuthenticatedUser, @Body() dto: OpenPackDto) {
+    return this.packsService.openPack(user.id, dto.packId);
   }
 }

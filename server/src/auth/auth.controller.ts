@@ -1,10 +1,11 @@
-import { Controller, Post, Get, Body, UseGuards, Req, Res } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Res, Header } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto, LoginDto } from './dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { AuthenticatedUser, CurrentUser } from '../common/auth/authenticated-user';
 
 @Controller('auth')
 export class AuthController {
@@ -14,6 +15,7 @@ export class AuthController {
   ) {}
 
   @Post('register')
+  @Header('Cache-Control', 'no-store')
   @Throttle({ default: { limit: 5, ttl: 15 * 60 * 1000 } })
   async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
     const auth = await this.authService.register(dto);
@@ -22,6 +24,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @Header('Cache-Control', 'no-store')
   @Throttle({ default: { limit: 5, ttl: 15 * 60 * 1000 } })
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     const auth = await this.authService.login(dto);
@@ -30,6 +33,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @Header('Cache-Control', 'no-store')
   logout(@Res({ passthrough: true }) res: Response) {
     res.clearCookie('kickit_access', this.cookieOptions());
     return { success: true };
@@ -37,8 +41,9 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  getProfile(@Req() req: any) {
-    return this.authService.getProfile(req.user.id);
+  @Header('Cache-Control', 'no-store')
+  getProfile(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.getProfile(user.id);
   }
 
   private setAccessCookie(res: Response, accessToken: string) {
@@ -52,7 +57,7 @@ export class AuthController {
     return {
       httpOnly: true,
       secure: this.config.get<string>('NODE_ENV') === 'production',
-      sameSite: 'lax' as const,
+      sameSite: 'strict' as const,
       path: '/api',
     };
   }

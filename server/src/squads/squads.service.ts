@@ -11,6 +11,12 @@ export interface SaveSquadSlot {
   cardId: string;
 }
 
+const FORMATION_POSITIONS: Record<string, Position[]> = {
+  '1-2-1': [Position.GK, Position.DEF, Position.MID, Position.MID, Position.FWD],
+  '2-1-1': [Position.GK, Position.DEF, Position.DEF, Position.MID, Position.FWD],
+  '1-1-2': [Position.GK, Position.DEF, Position.MID, Position.FWD, Position.FWD],
+};
+
 @Injectable()
 export class SquadsService {
   constructor(private prisma: PrismaService) {}
@@ -140,11 +146,27 @@ export class SquadsService {
 
     if (!this.prisma.isDbConnected) {
       const userCards = Array.from(this.prisma.memStore.cards.values()).filter(
-        (c) => c.ownerId === userId && cardIds.includes(c.id),
+        (c) => c.ownerId === userId && !c.isLocked && cardIds.includes(c.id),
       );
 
       const cardMap = new Map(userCards.map((c) => [c.id, c]));
       const starterSlots = dto.slots.filter((s) => s.slotIndex >= 0 && s.slotIndex <= 4);
+      if (userCards.length !== cardIds.length) {
+        throw new BadRequestException('One or more selected cards are unavailable');
+      }
+      if (starterSlots.length !== 5) {
+        throw new BadRequestException('All five starting positions are required');
+      }
+      const requiredPositions = FORMATION_POSITIONS[dto.formation];
+      for (let slotIndex = 0; slotIndex < requiredPositions.length; slotIndex++) {
+        const slot = starterSlots.find((item) => item.slotIndex === slotIndex);
+        const card = slot ? cardMap.get(slot.cardId) : undefined;
+        if (!card || card.template.position !== requiredPositions[slotIndex]) {
+          throw new BadRequestException(
+            `Slot ${slotIndex} requires a ${requiredPositions[slotIndex]} player`,
+          );
+        }
+      }
 
       let totalOvr = 0;
       for (const slot of starterSlots) {
@@ -188,7 +210,7 @@ export class SquadsService {
 
     // PostgreSQL path
     const cards = await this.prisma.card.findMany({
-      where: { id: { in: cardIds }, ownerId: userId },
+      where: { id: { in: cardIds }, ownerId: userId, isLocked: false },
       include: { template: true },
     });
 
@@ -199,13 +221,19 @@ export class SquadsService {
     const cardMap = new Map(cards.map((c) => [c.id, c]));
 
     const starterSlots = dto.slots.filter((s) => s.slotIndex >= 0 && s.slotIndex <= 4);
-    const gkSlot = starterSlots.find((s) => s.slotIndex === 0);
-    if (!gkSlot) {
-      throw new BadRequestException('Slot 0 (Goalkeeper) is required');
+    if (starterSlots.length !== 5) {
+      throw new BadRequestException('All five starting positions are required');
     }
-    const gkCard = cardMap.get(gkSlot.cardId);
-    if (gkCard?.template.position !== Position.GK) {
-      throw new BadRequestException('Slot 0 must contain a Goalkeeper (GK)');
+
+    const requiredPositions = FORMATION_POSITIONS[dto.formation];
+    for (let slotIndex = 0; slotIndex < requiredPositions.length; slotIndex++) {
+      const slot = starterSlots.find((item) => item.slotIndex === slotIndex);
+      const card = slot ? cardMap.get(slot.cardId) : undefined;
+      if (!card || card.template.position !== requiredPositions[slotIndex]) {
+        throw new BadRequestException(
+          `Slot ${slotIndex} requires a ${requiredPositions[slotIndex]} player`,
+        );
+      }
     }
 
     let totalOvr = 0;

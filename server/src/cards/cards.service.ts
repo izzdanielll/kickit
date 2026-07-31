@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Position, Rarity } from '@prisma/client';
+import { CardQueryDto } from './dto/card-query.dto';
 
 @Injectable()
 export class CardsService {
@@ -8,7 +9,7 @@ export class CardsService {
 
   async getUserCards(
     userId: string,
-    filters?: { position?: Position; rarity?: Rarity; search?: string },
+    filters: CardQueryDto,
   ) {
     if (!this.prisma.isDbConnected) {
       let cards = Array.from(this.prisma.memStore.cards.values()).filter((c) => c.ownerId === userId);
@@ -24,7 +25,8 @@ export class CardsService {
         cards = cards.filter((c) => c.template.playerName.toLowerCase().includes(query));
       }
 
-      return cards;
+      const start = (filters.page - 1) * filters.limit;
+      return cards.slice(start, start + filters.limit);
     }
 
     const where: any = { ownerId: userId };
@@ -54,6 +56,8 @@ export class CardsService {
         },
       },
       orderBy: { template: { rarity: 'desc' } },
+      skip: (filters.page - 1) * filters.limit,
+      take: filters.limit,
     });
 
     return cards;

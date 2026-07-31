@@ -85,15 +85,21 @@ export class PacksService {
       let cost: number;
 
       if (pack.coinCost !== null && pack.coinCost > 0) {
-        if (user.coins < pack.coinCost) throw new BadRequestException('Insufficient Coins');
         usedCurrency = Currency.COINS;
         cost = pack.coinCost;
-        await tx.user.update({ where: { id: userId }, data: { coins: { decrement: cost } } });
+        const debit = await tx.user.updateMany({
+          where: { id: userId, coins: { gte: cost } },
+          data: { coins: { decrement: cost } },
+        });
+        if (debit.count !== 1) throw new BadRequestException('Insufficient Coins');
       } else if (pack.gemCost !== null && pack.gemCost > 0) {
-        if (user.gems < pack.gemCost) throw new BadRequestException('Insufficient Gems');
         usedCurrency = Currency.GEMS;
         cost = pack.gemCost;
-        await tx.user.update({ where: { id: userId }, data: { gems: { decrement: cost } } });
+        const debit = await tx.user.updateMany({
+          where: { id: userId, gems: { gte: cost } },
+          data: { gems: { decrement: cost } },
+        });
+        if (debit.count !== 1) throw new BadRequestException('Insufficient Gems');
       } else {
         throw new BadRequestException('Invalid pack cost configuration');
       }

@@ -41,6 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await fetch(`${API_BASE}/auth/me`, {
         credentials: 'same-origin',
+        cache: 'no-store',
       });
       if (res.ok) {
         const userData = await res.json();
@@ -74,6 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
+        cache: 'no-store',
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
@@ -97,6 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
+          cache: 'no-store',
           body: JSON.stringify({ email, username, password }),
         });
         const data = await res.json();
@@ -114,13 +117,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    setError(null);
     try {
       await fetch(`${API_BASE}/auth/logout`, {
         method: 'POST',
         credentials: 'same-origin',
+        cache: 'no-store',
       });
     } finally {
       setUser(null);
+      setIsLoading(false);
     }
   }, []);
 

@@ -1,4 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaClient, Position, Rarity, PackType } from '@prisma/client';
 
 export const INITIAL_TEMPLATES = [
@@ -47,6 +48,10 @@ export class PrismaService
   private readonly logger = new Logger(PrismaService.name);
   public isDbConnected = false;
 
+  constructor(private readonly config: ConfigService) {
+    super();
+  }
+
   // In-Memory Data Store (Fallback if PostgreSQL is down)
   public memStore = {
     users: new Map<string, any>(), // key: id or email
@@ -64,6 +69,10 @@ export class PrismaService
       this.logger.log('Prisma connected to PostgreSQL database');
     } catch (e) {
       this.isDbConnected = false;
+      if (this.config.get<string>('NODE_ENV') === 'production') {
+        this.logger.error('Database connection failed; refusing to start in production');
+        throw e;
+      }
       this.logger.warn('PostgreSQL is not running on 5432. Active fallback: In-memory KickIt Store enabled! All features functioning 100% seamlessly.');
     }
   }

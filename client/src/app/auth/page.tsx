@@ -17,8 +17,12 @@ function AuthForm() {
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
-    if (user) router.push('/dashboard');
-  }, [user, router]);
+    if (!isLoading && user) router.replace('/dashboard');
+  }, [user, isLoading, router]);
+
+  useEffect(() => {
+    setMode(searchParams.get('mode') === 'register' ? 'register' : 'login');
+  }, [searchParams]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -28,7 +32,9 @@ function AuthForm() {
 
   const switchMode = () => {
     clearError();
-    setMode((current) => (current === 'login' ? 'register' : 'login'));
+    const nextMode = mode === 'login' ? 'register' : 'login';
+    setMode(nextMode);
+    router.replace(`/auth?mode=${nextMode}`);
   };
 
   return (

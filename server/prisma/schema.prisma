@@ -125,6 +125,8 @@ model Card {
   listings   MarketplaceListing[]
 
   @@map("cards")
+  @@index([ownerId, acquiredAt])
+  @@index([templateId])
 }
 
 // ─── Squads ─────────────────────────────────────────────
@@ -144,6 +146,7 @@ model Squad {
   matchesAway Match[]     @relation("AwaySquad")
 
   @@map("squads")
+  @@index([ownerId, isActive])
 }
 
 model PackDefinition {
@@ -230,4 +233,6 @@ model Match {
   playedAt    DateTime     @default(now())
 
   @@map("matches")
+  @@index([homeUserId, playedAt])
+  @@index([awayUserId, playedAt])
 }

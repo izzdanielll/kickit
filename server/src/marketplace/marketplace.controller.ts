@@ -7,25 +7,12 @@ import {
   Param,
   Query,
   UseGuards,
-  Req,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MarketplaceService } from './marketplace.service';
-import { Currency, Position, Rarity } from '@prisma/client';
-import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
-
-export class CreateListingDto {
-  @IsString()
-  @IsNotEmpty()
-  cardId: string;
-
-  @IsInt()
-  @Min(1)
-  price: number;
-
-  @IsEnum(Currency)
-  currency: Currency;
-}
+import { AuthenticatedUser, CurrentUser } from '../common/auth/authenticated-user';
+import { CreateListingDto, MarketplaceQueryDto } from './dto/marketplace.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('marketplace')
@@ -34,38 +21,30 @@ export class MarketplaceController {
 
   @Get('listings')
   getListings(
-    @Query('position') position?: Position,
-    @Query('rarity') rarity?: Rarity,
-    @Query('currency') currency?: Currency,
-    @Query('search') search?: string,
-    @Query('sort') sort?: 'price_asc' | 'price_desc' | 'recent',
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: MarketplaceQueryDto,
   ) {
-    return this.marketplaceService.getListings({
-      position,
-      rarity,
-      currency,
-      search,
-      sort,
-    });
+    return this.marketplaceService.getListings(user.id, query);
   }
 
   @Get('my-listings')
-  getMyListings(@Req() req: any) {
-    return this.marketplaceService.getMyListings(req.user.id);
+  getMyListings(@CurrentUser() user: AuthenticatedUser) {
+    return this.marketplaceService.getMyListings(user.id);
   }
 
   @Post('listings')
-  createListing(@Req() req: any, @Body() dto: CreateListingDto) {
-    return this.marketplaceService.createListing(req.user.id, dto);
+  createListing(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateListingDto) {
+    return this.marketplaceService.createListing(user.id, dto);
   }
 
   @Post('buy/:id')
-  buyListing(@Req() req: any, @Param('id') id: string) {
-    return this.marketplaceService.buyListing(req.user.id, id);
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  buyListing(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.marketplaceService.buyListing(user.id, id);
   }
 
   @Delete('listings/:id')
-  cancelListing(@Req() req: any, @Param('id') id: string) {
-    return this.marketplaceService.cancelListing(req.user.id, id);
+  cancelListing(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.marketplaceService.cancelListing(user.id, id);
   }
 }

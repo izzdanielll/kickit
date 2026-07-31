@@ -11,6 +11,7 @@ import { MarketplaceModule } from './marketplace/marketplace.module';
 import { SquadsModule } from './squads/squads.module';
 import { AppController } from './app.controller';
 import { HttpLoggerMiddleware } from './common/middleware/logger.middleware';
+import { SecurityMiddleware } from './common/middleware/security.middleware';
 
 @Module({
   imports: [
@@ -25,6 +26,9 @@ import { HttpLoggerMiddleware } from './common/middleware/logger.middleware';
           secret.includes('change-this-in-production')
         ) {
           throw new Error('JWT_SECRET must be a unique secret of at least 32 characters');
+        }
+        if (env.NODE_ENV === 'production' && !env.DATABASE_URL) {
+          throw new Error('DATABASE_URL is required in production');
         }
         return env;
       },
@@ -48,6 +52,6 @@ import { HttpLoggerMiddleware } from './common/middleware/logger.middleware';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(HttpLoggerMiddleware).forRoutes('*');
+    consumer.apply(SecurityMiddleware, HttpLoggerMiddleware).forRoutes('*');
   }
 }
