@@ -51,6 +51,14 @@ enum ListingStatus {
   CANCELLED
 }
 
+enum GameweekStatus {
+  UPCOMING
+  OPEN
+  LOCKED
+  SETTLING
+  COMPLETED
+}
+
 // ─── Users ──────────────────────────────────────────────
 
 model User {
@@ -73,6 +81,7 @@ model User {
   packOpenings   PackOpening[]
   listingsSold   MarketplaceListing[] @relation("ListingSeller")
   listingsBought MarketplaceListing[] @relation("ListingBuyer")
+  tournamentEntries TournamentEntry[]
 
   @@map("users")
 }
@@ -95,9 +104,12 @@ model CardTemplate {
   specialTrait String?
   imageUrl     String?
   season       String   @default("2024-25")
+  realWorldPlayerId Int? @unique
   createdAt    DateTime @default(now())
 
   cards Card[]
+  weeklyScores PlayerWeeklyScore[]
+  tournamentCards TournamentEntryCard[]
 
   @@unique([playerName, season])
   @@map("card_templates")
@@ -144,9 +156,91 @@ model Squad {
   squadCards  SquadCard[]
   matchesHome Match[]     @relation("HomeSquad")
   matchesAway Match[]     @relation("AwaySquad")
+  tournamentEntries TournamentEntry[]
 
   @@map("squads")
   @@index([ownerId, isActive])
+}
+
+model Gameweek {
+  id        String         @id @default(uuid())
+  number    Int            @unique
+  status    GameweekStatus @default(UPCOMING)
+  startTime DateTime
+  lockTime  DateTime
+  endTime   DateTime
+  settledAt DateTime?
+  processingStartedAt DateTime?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  scores  PlayerWeeklyScore[]
+  entries TournamentEntry[]
+
+  @@index([status, startTime])
+  @@index([status, lockTime])
+  @@index([status, endTime])
+  @@map("gameweeks")
+}
+
+model PlayerWeeklyScore {
+  id           String       @id @default(uuid())
+  gameweek     Gameweek     @relation(fields: [gameweekId], references: [id], onDelete: Cascade)
+  gameweekId   String
+  template     CardTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  templateId   String
+  minutesPlayed Int         @default(0)
+  goals         Int         @default(0)
+  assists       Int         @default(0)
+  yellowCards   Int         @default(0)
+  redCards      Int         @default(0)
+  ownGoals      Int         @default(0)
+  penaltyMisses Int         @default(0)
+  cleanSheet    Boolean     @default(false)
+  saves         Int         @default(0)
+  penaltySaves  Int         @default(0)
+  totalPoints   Int         @default(0)
+  sourceUpdatedAt DateTime
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([gameweekId, templateId])
+  @@index([gameweekId, totalPoints])
+  @@map("player_weekly_scores")
+}
+
+model TournamentEntry {
+  id         String   @id @default(uuid())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  squad      Squad    @relation(fields: [squadId], references: [id], onDelete: Restrict)
+  squadId    String
+  gameweek   Gameweek @relation(fields: [gameweekId], references: [id], onDelete: Cascade)
+  gameweekId String
+  totalScore Int      @default(0)
+  rank       Int?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  cards TournamentEntryCard[]
+
+  @@unique([userId, gameweekId])
+  @@index([gameweekId, totalScore])
+  @@map("tournament_entries")
+}
+
+model TournamentEntryCard {
+  id         String          @id @default(uuid())
+  entry      TournamentEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  entryId    String
+  template   CardTemplate    @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  templateId String
+  slotIndex  Int
+  multiplierBps Int
+
+  @@unique([entryId, slotIndex])
+  @@index([templateId])
+  @@map("tournament_entry_cards")
 }
 
 model PackDefinition {
@@ -196,6 +290,7 @@ model MarketplaceListing {
 
   @@index([status, createdAt])
   @@index([sellerId, status])
+  @@index([cardId, status])
   @@map("marketplace_listings")
 }
 

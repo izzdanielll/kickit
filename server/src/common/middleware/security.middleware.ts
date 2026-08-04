@@ -9,6 +9,7 @@ import { NextFunction, Request, Response } from 'express';
 @Injectable()
 export class SecurityMiddleware implements NestMiddleware {
   private readonly allowedOrigins: Set<string>;
+  private readonly requireOrigin: boolean;
 
   constructor(config: ConfigService) {
     this.allowedOrigins = new Set(
@@ -18,6 +19,7 @@ export class SecurityMiddleware implements NestMiddleware {
         .map((origin) => origin.trim())
         .filter(Boolean),
     );
+    this.requireOrigin = config.get<string>('NODE_ENV') === 'production';
   }
 
   use(request: Request, response: Response, next: NextFunction): void {
@@ -33,7 +35,7 @@ export class SecurityMiddleware implements NestMiddleware {
 
     if (this.isStateChanging(request.method)) {
       const origin = request.get('origin');
-      if (origin && !this.allowedOrigins.has(origin)) {
+      if ((!origin && this.requireOrigin) || (origin && !this.allowedOrigins.has(origin))) {
         throw new ForbiddenException('Request origin is not allowed');
       }
     }

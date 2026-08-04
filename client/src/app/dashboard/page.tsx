@@ -88,6 +88,18 @@ interface ActiveSquad {
   squadCards: { id: string; slotIndex: number; card: PlayerCard }[];
 }
 
+interface Gameweek {
+  id: string;
+  number: number;
+  status: 'UPCOMING' | 'OPEN' | 'LOCKED' | 'SETTLING' | 'COMPLETED';
+  startTime: string;
+  lockTime: string;
+  endTime: string;
+  entry: { totalScore: number; rank: number | null } | null;
+}
+
+interface LeaderboardRow { rank: number; userId: string; username: string; totalScore: number }
+
 const PACK_ODDS: Record<string, { COMMON: string; RARE: string; EPIC: string; LEGENDARY: string; MYTHIC: string }> = {
   BRONZE: { COMMON: '70.0%', RARE: '20.0%', EPIC: '7.0%', LEGENDARY: '2.5%', MYTHIC: '0.5%' },
   SILVER: { COMMON: '50.0%', RARE: '32.0%', EPIC: '12.0%', LEGENDARY: '5.0%', MYTHIC: '1.0%' },
@@ -143,6 +155,8 @@ export default function DashboardPage() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [myListings, setMyListings] = useState<Listing[]>([]);
   const [squad, setSquad] = useState<ActiveSquad | null>(null);
+  const [gameweek, setGameweek] = useState<Gameweek | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
 
   // Filters & Loading
   const [posFilter, setPosFilter] = useState<string>('ALL');
@@ -230,9 +244,24 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const fetchGameweek = useCallback(async () => {
+    try {
+      const response = await fetch('/api/gameweeks/current', { cache: 'no-store' });
+      if (!response.ok) return;
+      const current: Gameweek | null = await response.json();
+      setGameweek(current);
+      if (!current) return setLeaderboard([]);
+      const leaderboardResponse = await fetch(`/api/gameweeks/${current.id}/leaderboard?limit=5`, { cache: 'no-store' });
+      if (leaderboardResponse.ok) setLeaderboard((await leaderboardResponse.json()).data);
+    } catch (error) {
+      console.error('Error fetching gameweek:', error);
+    }
+  }, []);
+
   // Load data based on tab selection
   useEffect(() => {
     if (!user) return;
+    if (activeTab === 'play') void fetchGameweek();
     if (activeTab === 'club') void fetchCollection();
     if (activeTab === 'shop') void fetchPacks();
     if (activeTab === 'market') void fetchMarket();
@@ -240,7 +269,7 @@ export default function DashboardPage() {
       void fetchCollection();
       void fetchSquad();
     }
-  }, [activeTab, user, fetchCollection, fetchPacks, fetchMarket, fetchSquad]);
+  }, [activeTab, user, fetchCollection, fetchPacks, fetchMarket, fetchSquad, fetchGameweek]);
 
   // Keep My Club synchronized without a manual refresh control.
   useEffect(() => {
@@ -571,8 +600,10 @@ export default function DashboardPage() {
               <h1>YOUR CLUB.<br /><span>YOUR GLORY.</span></h1>
               <p>Choose a competition, build your 5-a-side, and turn real-world football into points.</p>
               <div className="competition-card available">
-                <div className="competition-banner"><span className="competition-badge">LIVE</span><span>GAMEWEEK 01</span></div>
-                <div className="competition-body"><Trophy size={25} /><div><b>Rising Stars Cup</b><small>Squad lock in 2 days, 14 hours</small></div></div>
+                <div className="competition-banner"><span className="competition-badge">{gameweek?.status ?? 'SCHEDULED'}</span><span>GAMEWEEK {String(gameweek?.number ?? 1).padStart(2, '0')}</span></div>
+                <div className="competition-body"><Trophy size={25} /><div><b>Rising Stars Cup</b><small>{gameweek ? `Squad lock: ${new Date(gameweek.lockTime).toLocaleString()}` : 'The next gameweek is being scheduled'}</small></div></div>
+                {gameweek?.entry && <div className="competition-body"><Users size={22} /><div><b>Your rank: {gameweek.entry.rank ? `#${gameweek.entry.rank}` : 'Pending'}</b><small>{gameweek.entry.totalScore} points</small></div></div>}
+                {leaderboard.length > 0 && <div className="competition-body"><Trophy size={22} /><div><b>Leaders</b><small>{leaderboard.map((row) => `${row.rank}. ${row.username} (${row.totalScore})`).join(' · ')}</small></div></div>}
               </div>
               <div className="competition-card locked">
                 <div className="competition-banner"><span>COMING NEXT</span></div>

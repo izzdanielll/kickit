@@ -7,6 +7,10 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
+  const proxyHops = Number(config.get<string>('TRUST_PROXY_HOPS', '0'));
+  if (proxyHops > 0) {
+    app.getHttpAdapter().getInstance().set('trust proxy', proxyHops);
+  }
 
   // Global prefix for all API routes
   app.setGlobalPrefix('api');

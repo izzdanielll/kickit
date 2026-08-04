@@ -19,7 +19,10 @@ out/
 Thumbs.db
 
 # Prisma
-server/prisma/migrations/
+server/prisma/*.db
+server/prisma/migrations/*
+!server/prisma/migrations/20260804000000_milestone_3_gameweeks/
+!server/prisma/migrations/20260804000000_milestone_3_gameweeks/migration.sql
 
 # Logs
 *.log

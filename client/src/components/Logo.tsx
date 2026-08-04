@@ -34,7 +34,7 @@ export function Logo({
         style={{ cursor: onClick ? 'pointer' : 'default', display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}
       >
         <img
-          src="/api/logo"
+          src="/logo.jpg"
           alt="KICK IT - Play. Collect. Compete. Win."
           className="logo-hero-image"
           style={{
@@ -59,7 +59,7 @@ export function Logo({
         style={{ cursor: onClick ? 'pointer' : 'default', display: 'inline-flex', alignItems: 'center' }}
       >
         <img
-          src="/api/logo"
+          src="/logo.jpg"
           alt="kickIt Emblem"
           style={{
             height: dim.height,
@@ -85,7 +85,7 @@ export function Logo({
       }}
     >
       <img
-        src="/api/logo"
+        src="/logo.jpg"
         alt="kickIt Logo Mark"
         style={{
           height: dim.height,

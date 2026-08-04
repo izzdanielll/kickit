@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Position } from '@prisma/client';
+import { GameweekStatus, Position } from '@prisma/client';
 
 export interface SaveSquadSlot {
   slotIndex: number;
@@ -130,6 +130,15 @@ export class SquadsService {
     userId: string,
     dto: { name?: string; formation: string; slots: SaveSquadSlot[] },
   ) {
+    if (this.prisma.isDbConnected) {
+      const lockedGameweek = await this.prisma.gameweek.findFirst({
+        where: { status: { in: [GameweekStatus.LOCKED, GameweekStatus.SETTLING] } },
+        select: { id: true },
+      });
+      if (lockedGameweek) {
+        throw new BadRequestException('Squads cannot be changed while a gameweek is locked');
+      }
+    }
     const validFormations = ['1-2-1', '2-1-1', '1-1-2'];
     if (!validFormations.includes(dto.formation)) {
       throw new BadRequestException(`Invalid formation. Choose from: ${validFormations.join(', ')}`);

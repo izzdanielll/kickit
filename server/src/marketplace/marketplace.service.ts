@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Currency, ListingStatus, Position, Rarity } from '@prisma/client';
+import { Currency, ListingStatus, Position, Prisma, Rarity } from '@prisma/client';
 import { MarketplaceQueryDto } from './dto/marketplace.dto';
 
 @Injectable()
@@ -132,6 +132,11 @@ export class MarketplaceService {
         throw new BadRequestException('Card is already locked or listed');
       }
 
+      const activeSquad = this.prisma.memStore.squads.get(userId);
+      if (activeSquad?.squadCards?.some((row: any) => row.card?.id === data.cardId)) {
+        throw new BadRequestException('Remove this card from your active squad before listing it');
+      }
+
       card.isLocked = true;
       const user = this.prisma.memStore.users.get(userId);
 
@@ -161,6 +166,14 @@ export class MarketplaceService {
 
       if (card.isLocked) {
         throw new BadRequestException('Card is already locked or listed');
+      }
+
+      const squadAssignment = await tx.squadCard.findFirst({
+        where: { cardId: data.cardId, squad: { isActive: true } },
+        select: { id: true },
+      });
+      if (squadAssignment) {
+        throw new BadRequestException('Remove this card from your active squad before listing it');
       }
 
       const lock = await tx.card.updateMany({
@@ -214,6 +227,12 @@ export class MarketplaceService {
         card.ownerId = buyerId;
         card.isLocked = false;
       }
+      const seller = this.prisma.memStore.users.get(listing.sellerId);
+      const sellerEarnings = Math.floor(listing.price * 0.95);
+      if (seller) {
+        if (listing.currency === 'COINS') seller.coins += sellerEarnings;
+        else seller.gems += sellerEarnings;
+      }
       listing.status = 'COMPLETED';
 
       return {
@@ -234,6 +253,15 @@ export class MarketplaceService {
 
       if (listing.sellerId === buyerId) {
         throw new BadRequestException('You cannot purchase your own listing');
+      }
+
+
+      const claimed = await tx.marketplaceListing.updateMany({
+        where: { id: listingId, status: ListingStatus.ACTIVE },
+        data: { buyerId, status: ListingStatus.COMPLETED },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('Listing is no longer active');
       }
 
       const buyer = await tx.user.findUnique({ where: { id: buyerId } });
@@ -272,17 +300,6 @@ export class MarketplaceService {
         },
       });
 
-      const claimed = await tx.marketplaceListing.updateMany({
-        where: { id: listingId, status: ListingStatus.ACTIVE },
-        data: {
-          buyerId,
-          status: ListingStatus.COMPLETED,
-        },
-      });
-      if (claimed.count !== 1) {
-        throw new BadRequestException('Listing is no longer active');
-      }
-
       const updatedListing = await tx.marketplaceListing.findUnique({
         where: { id: listingId },
         include: {
@@ -299,7 +316,7 @@ export class MarketplaceService {
         listing: updatedListing,
         user: updatedBuyer,
       };
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async cancelListing(userId: string, listingId: string) {
@@ -331,15 +348,20 @@ export class MarketplaceService {
         throw new BadRequestException('Listing is not active');
       }
 
+      const claimed = await tx.marketplaceListing.updateMany({
+        where: { id: listingId, sellerId: userId, status: ListingStatus.ACTIVE },
+        data: { status: ListingStatus.CANCELLED },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('Listing is not active');
+      }
+
       await tx.card.update({
         where: { id: listing.cardId },
         data: { isLocked: false },
       });
 
-      const cancelledListing = await tx.marketplaceListing.update({
-        where: { id: listingId },
-        data: { status: ListingStatus.CANCELLED },
-      });
+      const cancelledListing = await tx.marketplaceListing.findUniqueOrThrow({ where: { id: listingId } });
 
       return cancelledListing;
     });
