@@ -1,0 +1,6 @@
+# Synthetic UUID used to test pack idempotency. Fingerprint-scoped so future
+# findings in this test file remain visible.
+9b7aa59faed82aa4a79325be7a8ab1f5c51a5a6f:server/test/packs.test.ts:generic-api-key:20
+
+# Synthetic strength/uniqueness fixture used by production environment tests.
+9b7aa59faed82aa4a79325be7a8ab1f5c51a5a6f:server/test/environment-validation.test.ts:generic-api-key:6
