@@ -86,8 +86,25 @@ jobs:
           docker build -t kickit-server:ci server
           docker build --build-arg KICKIT_API_URL=http://server:3001 -t kickit-client:ci client
       - name: Scan migration image vulnerabilities
-        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-server-migration:ci --fail-on high
+        run: |
+          set +e
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-server-migration:ci --fail-on high -o json > /tmp/grype-migration.json
+          status=$?
+          jq -r '.matches[] | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical") | "::error title=Container vulnerability::\(.vulnerability.id) in \(.artifact.name) \(.artifact.version); fixed in \(.vulnerability.fix.versions // [] | join(", "))"' /tmp/grype-migration.json
+          exit "$status"
       - name: Scan server image vulnerabilities
-        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-server:ci --fail-on high
+        if: always()
+        run: |
+          set +e
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-server:ci --fail-on high -o json > /tmp/grype-server.json
+          status=$?
+          jq -r '.matches[] | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical") | "::error title=Container vulnerability::\(.vulnerability.id) in \(.artifact.name) \(.artifact.version); fixed in \(.vulnerability.fix.versions // [] | join(", "))"' /tmp/grype-server.json
+          exit "$status"
       - name: Scan client image vulnerabilities
-        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-client:ci --fail-on high
+        if: always()
+        run: |
+          set +e
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-client:ci --fail-on high -o json > /tmp/grype-client.json
+          status=$?
+          jq -r '.matches[] | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical") | "::error title=Container vulnerability::\(.vulnerability.id) in \(.artifact.name) \(.artifact.version); fixed in \(.vulnerability.fix.versions // [] | join(", "))"' /tmp/grype-client.json
+          exit "$status"
