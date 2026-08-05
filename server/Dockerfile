@@ -10,7 +10,8 @@ RUN npm run build
 
 FROM build AS migration
 ENV NODE_ENV=production
-CMD ["npm", "run", "prisma:deploy"]
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+CMD ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy && node node_modules/ts-node/dist/bin.js prisma/seed.ts"]
 
 FROM build AS production-dependencies
 RUN npm prune --omit=dev
@@ -18,7 +19,8 @@ RUN npm prune --omit=dev
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-RUN addgroup -S kickit && adduser -S -G kickit kickit
+RUN addgroup -S kickit && adduser -S -G kickit kickit \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=production-dependencies --chown=kickit:kickit /app/package.json ./package.json
 COPY --from=production-dependencies --chown=kickit:kickit /app/node_modules ./node_modules
 COPY --from=build --chown=kickit:kickit /app/dist ./dist

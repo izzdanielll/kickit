@@ -12,7 +12,8 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 WORKDIR /app
-RUN addgroup -S kickit && adduser -S -G kickit kickit
+RUN addgroup -S kickit && adduser -S -G kickit kickit \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build --chown=kickit:kickit /app/.next/standalone ./
 COPY --from=build --chown=kickit:kickit /app/.next/static ./.next/static
 COPY --from=build --chown=kickit:kickit /app/public ./public

@@ -17,7 +17,7 @@ The production `DATABASE_URL` must explicitly set `sslmode=require`, `verify-ca`
 
 1. Create an immutable release from a reviewed commit whose CI security gates pass.
 2. Back up PostgreSQL and record the backup identifier.
-3. Run the server Dockerfile's `migration` target as a one-off release job; it executes `npm run prisma:deploy`, which applies migrations and idempotently synchronizes the required pack/card-template catalog. Do not run `prisma migrate dev` in production and do not start application instances until this job succeeds.
+3. Run the server Dockerfile's `migration` target as a one-off release job; it applies migrations and idempotently synchronizes the required pack/card-template catalog (the equivalent local command is `npm run prisma:deploy`). Do not run `prisma migrate dev` in production and do not start application instances until this job succeeds.
    For the first release containing the economy ledger, pause economy writes from the old application before migration and keep them paused until the ledger-aware server is healthy. This prevents an old instance changing balances after the one-time opening-balance snapshot.
 4. Deploy the server image first. Require `/api/health/live` and `/api/health/ready` to pass before receiving traffic.
 5. Deploy the client image with `KICKIT_API_URL` set to the internal server origin.
