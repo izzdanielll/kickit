@@ -38,7 +38,16 @@ async function main() {
 
   await auth.logout(user.id, payload.jti);
   await assert.rejects(() => strategy.validate(payload));
-  assert.deepEqual(auditEvents, ['LOGIN_SUCCEEDED', 'SESSION_REVOKED']);
+  const loginPayloads: Array<{ sub: string; email: string; jti: string }> = [];
+  for (let index = 0; index < 12; index++) {
+    const login = await auth.login({ email: user.email, password: 'Password1' });
+    loginPayloads.push(jwt.verify<{ sub: string; email: string; jti: string }>(login.accessToken));
+  }
+  const activeSessions = [...sessions.values()].filter((session) => !session.revokedAt && session.expiresAt > new Date());
+  assert.equal(activeSessions.length, 10, 'active sessions must be capped per account');
+  await assert.rejects(() => strategy.validate(loginPayloads[0]), /Unauthorized/);
+  assert.equal((await strategy.validate(loginPayloads.at(-1)!)).sessionId, loginPayloads.at(-1)!.jti);
+  assert.deepEqual(auditEvents, ['LOGIN_SUCCEEDED', 'SESSION_REVOKED', ...Array(12).fill('LOGIN_SUCCEEDED')]);
   console.log('Session revocation tests passed');
 }
 

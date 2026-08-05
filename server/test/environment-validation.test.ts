@@ -31,6 +31,7 @@ for (const [name, mutate, expected] of [
   ['long JWT', (env: any) => { env.JWT_EXPIRES_IN = '48h'; }, /between 5 minutes/],
   ['cookie beyond JWT', (env: any) => { env.JWT_COOKIE_MAX_AGE_MS = '3600000'; }, /cannot exceed/],
   ['short recovery delay', (env: any) => { env.ACCOUNT_REQUEST_MIN_DELAY_MS = '100'; }, /between 500 and 3000/],
+  ['too many sessions', (env: any) => { env.MAX_ACTIVE_SESSIONS_PER_USER = '100'; }, /between 1 and 20/],
 ] as const) {
   const env = production();
   mutate(env);

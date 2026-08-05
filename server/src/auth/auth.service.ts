@@ -14,6 +14,7 @@ import { RegisterDto, LoginDto } from './dto';
 import { RequestSecurityContext, SecurityAuditService } from '../security-audit/security-audit.service';
 import { EmailService } from './email.service';
 import { MetricsService } from '../common/observability/metrics.service';
+import { runSerializable } from '../common/database/serializable-transaction';
 
 // A fixed cost-12 hash makes unknown-account login perform equivalent password
 // work without creating a per-request hash or exposing a usable credential.
@@ -429,10 +430,25 @@ export class AuthService {
     const sessionId = randomUUID();
     const lifetime = Number(this.config.get<string>('JWT_COOKIE_MAX_AGE_MS', '900000'));
     const expiresAt = new Date(Date.now() + lifetime);
+    const maximumSessions = Number(this.config.get<string>('MAX_ACTIVE_SESSIONS_PER_USER', '10'));
     if (!this.prisma.isDbConnected) {
-      this.prisma.memStore.sessions.set(sessionId, { id: sessionId, userId: user.id, expiresAt, revokedAt: null });
+      const createdAt = new Date();
+      this.prisma.memStore.sessions.set(sessionId, { id: sessionId, userId: user.id, expiresAt, revokedAt: null, createdAt });
+      const active = [...this.prisma.memStore.sessions.values()]
+        .filter((session) => session.userId === user.id && !session.revokedAt && session.expiresAt > createdAt)
+        .reverse();
+      for (const session of active.slice(maximumSessions)) session.revokedAt = createdAt;
     } else {
-      await this.prisma.session.create({ data: { id: sessionId, userId: user.id, expiresAt } });
+      await runSerializable(this.prisma, async (tx) => {
+        await tx.session.create({ data: { id: sessionId, userId: user.id, expiresAt } });
+        const overflow = await tx.session.findMany({
+          where: { userId: user.id, revokedAt: null, expiresAt: { gt: new Date() } },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip: maximumSessions,
+          select: { id: true },
+        });
+        if (overflow.length) await tx.session.updateMany({ where: { id: { in: overflow.map((session) => session.id) } }, data: { revokedAt: new Date() } });
+      });
     }
     const payload = { sub: user.id, email: user.email, jti: sessionId };
     const accessToken = this.jwt.sign(payload);

@@ -82,6 +82,7 @@ export function validateEnvironment(env: Environment): Environment {
   integerInRange(env, 'EMAIL_VERIFICATION_TTL_MS', 86400000, 900000, 172800000);
   integerInRange(env, 'PASSWORD_RESET_TTL_MS', 3600000, 300000, 86400000);
   integerInRange(env, 'ACCOUNT_REQUEST_MIN_DELAY_MS', 750, 500, 3000);
+  integerInRange(env, 'MAX_ACTIVE_SESSIONS_PER_USER', 10, 1, 20);
   integerInRange(env, 'ACCOUNT_TOKEN_RETENTION_DAYS', 7, 1, 30);
   integerInRange(env, 'SECURITY_EVENT_RETENTION_DAYS', 90, 30, 365);
   return env;
