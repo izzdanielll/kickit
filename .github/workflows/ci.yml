@@ -16,6 +16,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      DATABASE_URL: postgresql://kickit:ci-password@localhost:5432/kickit
+      JWT_SECRET: ci-jwt-secret-with-at-least-thirty-two-characters
     services:
       postgres:
         image: postgres:16-alpine
@@ -40,22 +43,28 @@ jobs:
           cache-dependency-path: |
             server/package-lock.json
             client/package-lock.json
-      - name: Install and validate server
+      - name: Install server and apply migrations
         working-directory: server
-        env:
-          DATABASE_URL: postgresql://kickit:ci-password@localhost:5432/kickit
-          JWT_SECRET: ci-jwt-secret-with-at-least-thirty-two-characters
         run: |
           npm ci
           npx prisma generate
           npx prisma validate
           npx prisma migrate deploy
+      - name: Build and test server security
+        working-directory: server
+        run: |
           npm run build
           npm run security:static
           npm test
+      - name: Verify server integration and data integrity
+        working-directory: server
+        run: |
           npm run test:e2e
           node scripts/database-snapshot.js > /tmp/kickit-database-snapshot.json
           RESTORE_SNAPSHOT_FILE=/tmp/kickit-database-snapshot.json npm run restore:verify
+      - name: Audit server dependencies
+        working-directory: server
+        run: |
           npm audit --audit-level=high
       - name: Install and validate client
         working-directory: client
