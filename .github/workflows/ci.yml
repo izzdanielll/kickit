@@ -54,7 +54,8 @@ jobs:
           npm run security:static
           npm test
           npm run test:e2e
-          npm run economy:reconcile
+          node scripts/database-snapshot.js > /tmp/kickit-database-snapshot.json
+          RESTORE_SNAPSHOT_FILE=/tmp/kickit-database-snapshot.json npm run restore:verify
           npm audit --audit-level=high
       - name: Install and validate client
         working-directory: client

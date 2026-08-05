@@ -9,6 +9,8 @@
     "test": "ts-node test/scoring.test.ts && ts-node test/packs.test.ts && ts-node test/sports-data.test.ts && ts-node test/gameweek-settlement.test.ts && ts-node test/leaderboard-cache.test.ts && ts-node test/transaction-retry.test.ts && ts-node test/pagination.test.ts && ts-node test/auth-input.test.ts && ts-node test/session-security.test.ts && ts-node test/account-recovery.test.ts && ts-node test/marketplace-security.test.ts && ts-node test/observability.test.ts && ts-node test/security-retention.test.ts && ts-node test/security-audit.test.ts && ts-node test/environment-validation.test.ts",
     "test:e2e": "ts-node test/http-e2e.test.ts",
     "load:smoke": "node scripts/load-smoke.js",
+    "backup:snapshot": "node scripts/database-snapshot.js",
+    "restore:verify": "node scripts/verify-restore.js && node scripts/reconcile-economy.js",
     "economy:reconcile": "node scripts/reconcile-economy.js",
     "security:static": "node scripts/static-security-check.js",
     "test:staging": "node scripts/staging-acceptance.js",

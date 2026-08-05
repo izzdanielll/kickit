@@ -39,10 +39,11 @@ Use rolling or blue/green deployment with at least two server instances. The sch
 At least monthly, restore the newest production backup into an isolated account/project. Never restore over production during a drill.
 
 1. Record the source backup ID and its timestamp.
+   Immediately before the backup, capture a read-only comparison manifest with `npm run backup:snapshot > kickit-backup-snapshot.json`; store it with the backup evidence, not in Git.
 2. Restore into a newly created PostgreSQL instance with no public access.
 3. Run `npx prisma migrate status`; it must report all migrations applied.
-4. Verify row counts for users, cards, pack openings, marketplace listings, gameweeks, entries, and security events against the source snapshot.
-5. Verify referential integrity and run a read-only application smoke test.
+4. Run `RESTORE_SNAPSHOT_FILE=../kickit-backup-snapshot.json npm run restore:verify` against the isolated restore. It requires exact per-model row counts, identical applied migration names/checksums, validated foreign keys, and a continuous economy ledger.
+5. Run a read-only application smoke test against the isolated restore.
 6. Record recovery point objective (RPO) and recovery time objective (RTO). Launch targets: RPO <= 24 hours and RTO <= 4 hours; tighten these after traffic justifies it.
 7. Destroy the isolated restore and its copied secrets after evidence is retained.
 
