@@ -32,6 +32,12 @@ Retain its JSON output with the release evidence. The gate verifies liveness/rea
 
 Run the repeatable smoke-load gate against staging with `LOAD_TARGET=https://staging.example/api/health/ready LOAD_DURATION_MS=60000 LOAD_CONCURRENCY=50 npm run load:smoke`. This lightweight gate must show <=1% errors and p95 <=500 ms. Follow it with a representative authenticated journey test before launch; health-check throughput alone is not a capacity claim.
 
+Run the read-only authenticated journey from multiple load-runner source IPs, using one dedicated verified staging account per worker. Each worker is deliberately capped below the API's per-IP abuse limit; do not weaken throttling or forge forwarding headers for a load test:
+
+`AUTH_LOAD_API_URL=https://staging.example/api AUTH_LOAD_ORIGIN=https://staging.example AUTH_LOAD_EMAIL=... AUTH_LOAD_PASSWORD=... AUTH_LOAD_DURATION_MS=300000 AUTH_LOAD_REQUESTS_PER_SECOND=1.25 AUTH_LOAD_CONFIRM=I_UNDERSTAND_THIS_CREATES_A_SESSION npm run load:authenticated`
+
+Aggregate the worker reports and retain them as the `authenticatedLoad` release artifact. Every worker must show <=1% errors and p95 <=750 ms. A test account must not be shared across more than `MAX_ACTIVE_SESSIONS_PER_USER` concurrent workers.
+
 Use rolling or blue/green deployment with at least two server instances. The scheduler lease and serializable transactions protect shared work, while Redis provides distributed throttling.
 
 ## Backup and restore drill
