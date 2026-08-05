@@ -1,0 +1,21 @@
+{
+  "format": "kickit-release-evidence-v1",
+  "releaseCommit": "replace-with-full-40-character-git-sha",
+  "environment": "production",
+  "checks": {
+    "ci": { "status": "pending", "evidence": "", "recordedAt": "" },
+    "imageScans": { "status": "pending", "evidence": "", "recordedAt": "" },
+    "stagingMigrations": { "status": "pending", "evidence": "", "recordedAt": "" },
+    "stagingAcceptance": { "status": "pending", "evidence": "", "recordedAt": "" },
+    "authenticatedLoad": { "status": "pending", "evidence": "", "recordedAt": "" },
+    "restoreDrill": { "status": "pending", "evidence": "", "recordedAt": "" },
+    "rollbackDrill": { "status": "pending", "evidence": "", "recordedAt": "" },
+    "alertDelivery": { "status": "pending", "evidence": "", "recordedAt": "" },
+    "productionSmoke": { "status": "pending", "evidence": "", "recordedAt": "" }
+  },
+  "approvals": {
+    "operations": { "approved": false, "owner": "", "recordedAt": "" },
+    "security": { "approved": false, "owner": "", "recordedAt": "" },
+    "legalProduct": { "approved": false, "owner": "", "recordedAt": "" }
+  }
+}

@@ -86,6 +86,12 @@ Before rollback, confirm the previous application version can read the migrated 
 
 ## Launch approval evidence
 
+Copy `docs/RELEASE_EVIDENCE.example.json` outside the repository, fill it with references to immutable reports for the exact release commit, and run:
+
+`RELEASE_COMMIT_SHA=<full-40-character-sha> RELEASE_EVIDENCE_FILE=<path-to-evidence.json> npm run release:verify`
+
+The gate fails closed when a required check, named approval, evidence reference, commit match, or fresh technical timestamp is missing. Do not commit completed evidence because it can contain internal infrastructure references.
+
 - CI build, test, migration, and dependency-audit checks are green.
 - Both images have been built and scanned for critical/high findings.
 - A fresh staging database has successfully applied the complete migration chain.
