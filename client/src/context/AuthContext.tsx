@@ -17,7 +17,7 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, username: string, password: string) => Promise<void>;
+  register: (email: string, username: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   updateUserCoinsGems: (coins?: number, gems?: number) => void;
@@ -106,9 +106,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!res.ok) {
           throw new Error(data.message || 'Registration failed');
         }
+        if (data.verificationRequired) {
+          setUser(null);
+          return true;
+        }
         setUser(data.user);
+        return false;
       } catch (err: any) {
         setError(err.message);
+        return false;
       } finally {
         setIsLoading(false);
       }

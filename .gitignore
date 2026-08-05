@@ -5,6 +5,7 @@ node_modules/
 dist/
 .next/
 out/
+*.tsbuildinfo
 
 # Environment
 .env
@@ -20,9 +21,6 @@ Thumbs.db
 
 # Prisma
 server/prisma/*.db
-server/prisma/migrations/*
-!server/prisma/migrations/20260804000000_milestone_3_gameweeks/
-!server/prisma/migrations/20260804000000_milestone_3_gameweeks/migration.sql
 
 # Logs
 *.log

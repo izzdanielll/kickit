@@ -1,0 +1,76 @@
+name: CI security gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: kickit
+          POSTGRES_PASSWORD: ci-password
+          POSTGRES_DB: kickit
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U kickit" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Scan repository history for secrets
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git --source=/repo --redact --no-banner
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+      - name: Install and validate server
+        working-directory: server
+        env:
+          DATABASE_URL: postgresql://kickit:ci-password@localhost:5432/kickit
+          JWT_SECRET: ci-jwt-secret-with-at-least-thirty-two-characters
+        run: |
+          npm ci
+          npx prisma generate
+          npx prisma validate
+          npx prisma migrate deploy
+          npm run build
+          npm run security:static
+          npm test
+          npm run test:e2e
+          npm run economy:reconcile
+          npm audit --audit-level=high
+      - name: Install and validate client
+        working-directory: client
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+          npm run test:security
+          npm audit --audit-level=high
+      - name: Build immutable containers
+        run: |
+          docker build --target migration -t kickit-server-migration:ci server
+          docker build -t kickit-server:ci server
+          docker build --build-arg KICKIT_API_URL=http://server:3001 -t kickit-client:ci client
+      - name: Scan containers for high and critical vulnerabilities
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-server-migration:ci --fail-on high
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-server:ci --fail-on high
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-client:ci --fail-on high

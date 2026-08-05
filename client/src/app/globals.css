@@ -3,8 +3,6 @@
    Luxury Gold & Carbon Metallic Theme (Matching Official Logo)
    ────────────────────────────────────────────────────── */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800;900&display=swap');
-
 /* ── CSS Variables ────────────────────────────────── */
 :root {
   /* Background palette */
@@ -60,8 +58,8 @@
   --radius-full: 9999px;
 
   /* Typography */
-  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-display: 'Outfit', 'Inter', sans-serif;
+  --font-body: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: Outfit, Inter, ui-sans-serif, "Segoe UI", sans-serif;
 
   /* Transitions */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);

@@ -58,6 +58,10 @@ export class PrismaService
     cards: new Map<string, any>(), // key: id
     squads: new Map<string, any>(), // key: userId
     listings: new Map<string, any>(), // key: id
+    packOpenings: new Map<string, any>(), // key: ownerId:idempotencyKey
+    sessions: new Map<string, any>(), // key: session id
+    securityEvents: [] as any[],
+    accountTokens: new Map<string, any>(), // key: SHA-256 token hash
     templates: INITIAL_TEMPLATES,
     packs: INITIAL_PACKS,
   };

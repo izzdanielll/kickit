@@ -8,6 +8,6 @@ import { LeaderboardCacheService } from './leaderboard-cache.service';
 @Module({
   controllers: [GameweeksController],
   providers: [GameweeksService, GameweekScheduler, SportsDataService, LeaderboardCacheService],
-  exports: [GameweeksService],
+  exports: [GameweeksService, LeaderboardCacheService],
 })
 export class GameweeksModule {}

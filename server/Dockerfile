@@ -1,0 +1,29 @@
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY prisma ./prisma
+RUN npx prisma generate
+COPY tsconfig.json tsconfig.build.json nest-cli.json ./
+COPY src ./src
+RUN npm run build
+
+FROM build AS migration
+ENV NODE_ENV=production
+CMD ["npx", "prisma", "migrate", "deploy"]
+
+FROM build AS production-dependencies
+RUN npm prune --omit=dev
+
+FROM node:22-alpine AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+RUN addgroup -S kickit && adduser -S -G kickit kickit
+COPY --from=production-dependencies --chown=kickit:kickit /app/package.json ./package.json
+COPY --from=production-dependencies --chown=kickit:kickit /app/node_modules ./node_modules
+COPY --from=build --chown=kickit:kickit /app/dist ./dist
+COPY --from=build --chown=kickit:kickit /app/prisma ./prisma
+USER kickit
+EXPOSE 3001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD node -e "fetch('http://127.0.0.1:3001/api/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+CMD ["node", "dist/src/main.js"]

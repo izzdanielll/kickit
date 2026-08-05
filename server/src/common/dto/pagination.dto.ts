@@ -6,6 +6,7 @@ export class PaginationDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(1000)
   page = 1;
 
   @IsOptional()

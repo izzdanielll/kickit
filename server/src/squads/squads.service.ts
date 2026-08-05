@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GameweekStatus, Position } from '@prisma/client';
+import { runSerializable } from '../common/database/serializable-transaction';
 
 export interface SaveSquadSlot {
   slotIndex: number;
@@ -259,7 +260,26 @@ export class SquadsService {
     }
     const avgOvr = totalOvr / starterSlots.length;
 
-    return this.prisma.$transaction(async (tx) => {
+    return runSerializable(this.prisma, async (tx) => {
+      const lockedGameweek = await tx.gameweek.findFirst({
+        where: { status: { in: [GameweekStatus.LOCKED, GameweekStatus.SETTLING] } },
+        select: { id: true },
+      });
+      if (lockedGameweek) throw new BadRequestException('Squads cannot be changed while a gameweek is locked');
+
+      const transactionCards = await tx.card.findMany({
+        where: { id: { in: cardIds }, ownerId: userId, isLocked: false },
+        include: { template: true },
+      });
+      if (transactionCards.length !== cardIds.length) throw new BadRequestException('One or more selected cards are unavailable');
+      const transactionCardMap = new Map(transactionCards.map((card) => [card.id, card]));
+      for (let slotIndex = 0; slotIndex < requiredPositions.length; slotIndex++) {
+        const slot = starterSlots.find((item) => item.slotIndex === slotIndex);
+        if (!slot || transactionCardMap.get(slot.cardId)?.template.position !== requiredPositions[slotIndex]) {
+          throw new BadRequestException(`Slot ${slotIndex} requires a ${requiredPositions[slotIndex]} player`);
+        }
+      }
+
       let squad = await tx.squad.findFirst({
         where: { ownerId: userId, isActive: true },
       });

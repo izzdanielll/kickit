@@ -5,8 +5,12 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Currency, ListingStatus, Position, Prisma, Rarity } from '@prisma/client';
+import { Currency, ListingStatus, Position, Rarity } from '@prisma/client';
 import { MarketplaceQueryDto } from './dto/marketplace.dto';
+import { runSerializable } from '../common/database/serializable-transaction';
+import { PaginationDto } from '../common/dto/pagination.dto';
+
+const MAX_BALANCE = 2_000_000_000;
 
 @Injectable()
 export class MarketplaceService {
@@ -94,11 +98,13 @@ export class MarketplaceService {
     return listings;
   }
 
-  async getMyListings(userId: string) {
+  async getMyListings(userId: string, pagination: PaginationDto = new PaginationDto()) {
     if (!this.prisma.isDbConnected) {
-      return Array.from(this.prisma.memStore.listings.values()).filter(
+      const listings = Array.from(this.prisma.memStore.listings.values()).filter(
         (l) => l.sellerId === userId,
       );
+      const start = (pagination.page - 1) * pagination.limit;
+      return listings.slice(start, start + pagination.limit);
     }
 
     return this.prisma.marketplaceListing.findMany({
@@ -112,6 +118,8 @@ export class MarketplaceService {
         },
       },
       orderBy: { createdAt: 'desc' },
+      skip: (pagination.page - 1) * pagination.limit,
+      take: pagination.limit,
     });
   }
 
@@ -155,7 +163,7 @@ export class MarketplaceService {
       return listingObj;
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    return runSerializable(this.prisma, async (tx) => {
       const card = await tx.card.findFirst({
         where: { id: data.cardId, ownerId: userId },
       });
@@ -213,6 +221,12 @@ export class MarketplaceService {
 
       const buyer = this.prisma.memStore.users.get(buyerId);
       if (!buyer) throw new NotFoundException('Buyer user not found');
+      const seller = this.prisma.memStore.users.get(listing.sellerId);
+      const sellerEarnings = Math.floor(listing.price * 0.95);
+      if (seller) {
+        const balance = listing.currency === 'COINS' ? seller.coins : seller.gems;
+        if (balance > MAX_BALANCE - sellerEarnings) throw new BadRequestException('Seller balance limit reached');
+      }
 
       if (listing.currency === 'COINS') {
         if (buyer.coins < listing.price) throw new BadRequestException('Insufficient Coins');
@@ -227,8 +241,6 @@ export class MarketplaceService {
         card.ownerId = buyerId;
         card.isLocked = false;
       }
-      const seller = this.prisma.memStore.users.get(listing.sellerId);
-      const sellerEarnings = Math.floor(listing.price * 0.95);
       if (seller) {
         if (listing.currency === 'COINS') seller.coins += sellerEarnings;
         else seller.gems += sellerEarnings;
@@ -241,7 +253,7 @@ export class MarketplaceService {
       };
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    return runSerializable(this.prisma, async (tx) => {
       const listing = await tx.marketplaceListing.findUnique({
         where: { id: listingId },
         include: { card: true },
@@ -276,20 +288,22 @@ export class MarketplaceService {
           data: { coins: { decrement: listing.price } },
         });
         if (debit.count !== 1) throw new BadRequestException('Insufficient Coins');
-        await tx.user.update({
-          where: { id: listing.sellerId },
+        const credit = await tx.user.updateMany({
+          where: { id: listing.sellerId, coins: { lte: MAX_BALANCE - sellerEarnings } },
           data: { coins: { increment: sellerEarnings } },
         });
+        if (credit.count !== 1) throw new BadRequestException('Seller balance limit reached');
       } else {
         const debit = await tx.user.updateMany({
           where: { id: buyerId, gems: { gte: listing.price } },
           data: { gems: { decrement: listing.price } },
         });
         if (debit.count !== 1) throw new BadRequestException('Insufficient Gems');
-        await tx.user.update({
-          where: { id: listing.sellerId },
+        const credit = await tx.user.updateMany({
+          where: { id: listing.sellerId, gems: { lte: MAX_BALANCE - sellerEarnings } },
           data: { gems: { increment: sellerEarnings } },
         });
+        if (credit.count !== 1) throw new BadRequestException('Seller balance limit reached');
       }
 
       await tx.card.update({
@@ -311,12 +325,31 @@ export class MarketplaceService {
         where: { id: buyerId },
         select: { coins: true, gems: true },
       });
+      const updatedSeller = await tx.user.findUnique({
+        where: { id: listing.sellerId },
+        select: { coins: true, gems: true },
+      });
+      if (!updatedBuyer || !updatedSeller) throw new NotFoundException('Marketplace account not found');
+      await tx.economyTransaction.createMany({
+        data: [
+          {
+            userId: buyerId, currency: listing.currency, amount: -listing.price,
+            balanceAfter: listing.currency === Currency.COINS ? updatedBuyer.coins : updatedBuyer.gems,
+            reason: 'MARKETPLACE_PURCHASE', referenceId: listing.id,
+          },
+          {
+            userId: listing.sellerId, currency: listing.currency, amount: sellerEarnings,
+            balanceAfter: listing.currency === Currency.COINS ? updatedSeller.coins : updatedSeller.gems,
+            reason: 'MARKETPLACE_SALE', referenceId: listing.id,
+          },
+        ],
+      });
 
       return {
         listing: updatedListing,
         user: updatedBuyer,
       };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    });
   }
 
   async cancelListing(userId: string, listingId: string) {
@@ -324,6 +357,7 @@ export class MarketplaceService {
       const listing = this.prisma.memStore.listings.get(listingId);
       if (!listing) throw new NotFoundException('Listing not found');
       if (listing.sellerId !== userId) throw new ForbiddenException('You can only cancel your own listings');
+      if (listing.status !== 'ACTIVE') throw new BadRequestException('Listing is not active');
 
       const card = this.prisma.memStore.cards.get(listing.cardId);
       if (card) card.isLocked = false;

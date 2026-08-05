@@ -3,6 +3,7 @@ import { GameweekStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LeaderboardCacheService } from './leaderboard-cache.service';
 import { rarityMultiplierBps } from './scoring';
+import { runSerializable } from '../common/database/serializable-transaction';
 
 @Injectable()
 export class GameweeksService {
@@ -24,16 +25,16 @@ export class GameweeksService {
 
   async leaderboard(gameweekId: string, page: number, limit: number) {
     if (!this.prisma.isDbConnected) return { data: [], page, limit };
-    const exists = await this.prisma.gameweek.findUnique({ where: { id: gameweekId }, select: { id: true } });
+    const exists = await this.prisma.gameweek.findUnique({ where: { id: gameweekId }, select: { id: true, updatedAt: true } });
     if (!exists) throw new NotFoundException('Gameweek not found');
-    const cached = await this.cache.page(gameweekId, page, limit);
+    const cached = await this.cache.page(gameweekId, exists.updatedAt.getTime(), page, limit);
     if (cached) return { data: cached, page, limit, source: 'cache' };
     const skip = (page - 1) * limit;
     const entries = await this.prisma.tournamentEntry.findMany({
       where: { gameweekId }, orderBy: [{ totalScore: 'desc' }, { createdAt: 'asc' }], skip, take: limit,
-      select: { userId: true, totalScore: true, user: { select: { username: true } } },
+      select: { userId: true, totalScore: true, rank: true, user: { select: { username: true } } },
     });
-    return { data: entries.map((entry, index) => ({ rank: skip + index + 1, userId: entry.userId, username: entry.user.username, totalScore: entry.totalScore })), page, limit, source: 'database' };
+    return { data: entries.map((entry, index) => ({ rank: entry.rank ?? skip + index + 1, userId: entry.userId, username: entry.user.username, totalScore: entry.totalScore })), page, limit, source: 'database' };
   }
 
   async openDue(now: Date) {
@@ -69,7 +70,7 @@ export class GameweeksService {
   }
 
   private async lockOne(gameweekId: string) {
-    await this.prisma.$transaction(async (tx) => {
+    await runSerializable(this.prisma, async (tx) => {
       const claimed = await tx.gameweek.updateMany({ where: { id: gameweekId, status: GameweekStatus.OPEN }, data: { status: GameweekStatus.LOCKED } });
       if (claimed.count !== 1) return;
       const squads = await tx.squad.findMany({
@@ -80,11 +81,11 @@ export class GameweeksService {
         const entry = await tx.tournamentEntry.create({ data: { userId: squad.ownerId, squadId: squad.id, gameweekId } });
         await tx.tournamentEntryCard.createMany({ data: squad.squadCards.map((row) => ({ entryId: entry.id, templateId: row.card.templateId, slotIndex: row.slotIndex, multiplierBps: rarityMultiplierBps(row.card.template.rarity) })) });
       }
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    });
   }
 
   async settle(gameweekId: string) {
-    const entries = await this.prisma.$transaction(async (tx) => {
+    const entries = await runSerializable(this.prisma, async (tx) => {
       const claimed = await tx.gameweek.updateMany({ where: { id: gameweekId, status: GameweekStatus.SETTLING }, data: { status: GameweekStatus.COMPLETED, settledAt: new Date() } });
       if (claimed.count !== 1) return null;
       const allEntries = await tx.tournamentEntry.findMany({ where: { gameweekId }, include: { cards: { include: { template: { include: { weeklyScores: { where: { gameweekId } } } } } }, user: { select: { username: true } } } });
@@ -92,14 +93,19 @@ export class GameweeksService {
       scored.sort((a, b) => b.totalScore - a.totalScore || a.entry.createdAt.getTime() - b.entry.createdAt.getTime());
       let previousScore: number | undefined;
       let rank = 0;
+      const ranked: Array<(typeof scored)[number] & { rank: number }> = [];
       for (let index = 0; index < scored.length; index++) {
         if (scored[index].totalScore !== previousScore) rank = index + 1;
         previousScore = scored[index].totalScore;
         await tx.tournamentEntry.update({ where: { id: scored[index].entry.id }, data: { totalScore: scored[index].totalScore, rank } });
+        ranked.push({ ...scored[index], rank });
       }
-      return scored.map(({ entry, totalScore }) => ({ userId: entry.userId, totalScore, user: entry.user }));
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    if (entries) await this.cache.rebuild(gameweekId, entries);
+      return ranked.map(({ entry, totalScore, rank: entryRank }) => ({ userId: entry.userId, totalScore, rank: entryRank, user: entry.user }));
+    });
+    if (entries) {
+      const version = await this.prisma.gameweek.findUniqueOrThrow({ where: { id: gameweekId }, select: { updatedAt: true } });
+      await this.cache.rebuild(gameweekId, version.updatedAt.getTime(), entries);
+    }
   }
 
   async lockedEndingBefore(now: Date) {

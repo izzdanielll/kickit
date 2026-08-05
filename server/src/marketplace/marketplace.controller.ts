@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MarketplaceService } from './marketplace.service';
 import { AuthenticatedUser, CurrentUser } from '../common/auth/authenticated-user';
 import { CreateListingDto, MarketplaceQueryDto } from './dto/marketplace.dto';
+import { PaginationDto } from '../common/dto/pagination.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('marketplace')
@@ -28,8 +29,8 @@ export class MarketplaceController {
   }
 
   @Get('my-listings')
-  getMyListings(@CurrentUser() user: AuthenticatedUser) {
-    return this.marketplaceService.getMyListings(user.id);
+  getMyListings(@CurrentUser() user: AuthenticatedUser, @Query() query: PaginationDto) {
+    return this.marketplaceService.getMyListings(user.id, query);
   }
 
   @Post('listings')

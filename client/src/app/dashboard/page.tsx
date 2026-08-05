@@ -19,7 +19,7 @@ import {
   Tag,
   Info,
 } from 'lucide-react';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { Logo } from '@/components/Logo';
@@ -177,6 +177,7 @@ export default function DashboardPage() {
   const [isSelling, setIsSelling] = useState<boolean>(false);
 
   const [openingPack, setOpeningPack] = useState<boolean>(false);
+  const packRequestKeys = useRef(new Map<string, string>());
   const [revealedCards, setRevealedCards] = useState<PlayerCard[] | null>(null);
 
   const [buyingListing, setBuyingListing] = useState<Listing | null>(null);
@@ -344,18 +345,22 @@ export default function DashboardPage() {
   // ── Actions ─────────────────────────────────────────────────
   const handleOpenPack = async (packId: string) => {
     setOpeningPack(true);
+    const idempotencyKey = packRequestKeys.current.get(packId) ?? crypto.randomUUID();
+    packRequestKeys.current.set(packId, idempotencyKey);
     try {
       const res = await fetch('/api/packs/open', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packId }),
+        body: JSON.stringify({ packId, idempotencyKey }),
       });
       const data = await res.json();
       if (!res.ok) {
+        packRequestKeys.current.delete(packId);
         alert(data.message || 'Failed to open pack');
         return;
       }
       setRevealedCards(data.cards);
+      packRequestKeys.current.delete(packId);
       if (data.user) {
         updateUserCoinsGems(data.user.coins, data.user.gems);
       } else {

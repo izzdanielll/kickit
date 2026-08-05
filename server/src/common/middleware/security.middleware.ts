@@ -32,6 +32,7 @@ export class SecurityMiddleware implements NestMiddleware {
       "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     );
     response.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+    if (request.cookies?.kickit_access) response.setHeader('Cache-Control', 'no-store');
 
     if (this.isStateChanging(request.method)) {
       const origin = request.get('origin');

@@ -18,6 +18,6 @@ export class PacksController {
   @Post('open')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   openPack(@CurrentUser() user: AuthenticatedUser, @Body() dto: OpenPackDto) {
-    return this.packsService.openPack(user.id, dto.packId);
+    return this.packsService.openPack(user.id, dto.packId, dto.idempotencyKey);
   }
 }
