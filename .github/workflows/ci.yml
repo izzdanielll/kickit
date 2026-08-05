@@ -49,7 +49,7 @@ jobs:
           npm ci
           npx prisma generate
           npx prisma validate
-          npx prisma migrate deploy
+          npm run prisma:deploy
       - name: Build and test server security
         working-directory: server
         run: |

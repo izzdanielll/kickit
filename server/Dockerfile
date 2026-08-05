@@ -10,7 +10,7 @@ RUN npm run build
 
 FROM build AS migration
 ENV NODE_ENV=production
-CMD ["npx", "prisma", "migrate", "deploy"]
+CMD ["npm", "run", "prisma:deploy"]
 
 FROM build AS production-dependencies
 RUN npm prune --omit=dev
