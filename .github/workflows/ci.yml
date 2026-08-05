@@ -85,8 +85,9 @@ jobs:
           docker build --target migration -t kickit-server-migration:ci server
           docker build -t kickit-server:ci server
           docker build --build-arg KICKIT_API_URL=http://server:3001 -t kickit-client:ci client
-      - name: Scan containers for high and critical vulnerabilities
-        run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-server-migration:ci --fail-on high
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-server:ci --fail-on high
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-client:ci --fail-on high
+      - name: Scan migration image vulnerabilities
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-server-migration:ci --fail-on high
+      - name: Scan server image vulnerabilities
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-server:ci --fail-on high
+      - name: Scan client image vulnerabilities
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/grype:v0.112.0 kickit-client:ci --fail-on high
