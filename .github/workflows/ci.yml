@@ -56,11 +56,17 @@ jobs:
           npm run build
           npm run security:static
           npm test
-      - name: Verify server integration and data integrity
+      - name: Test server HTTP integration
         working-directory: server
         run: |
           npm run test:e2e
+      - name: Capture database integrity snapshot
+        working-directory: server
+        run: |
           node scripts/database-snapshot.js > /tmp/kickit-database-snapshot.json
+      - name: Verify database restore integrity
+        working-directory: server
+        run: |
           RESTORE_SNAPSHOT_FILE=/tmp/kickit-database-snapshot.json npm run restore:verify
       - name: Audit server dependencies
         working-directory: server
