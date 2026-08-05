@@ -5,6 +5,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { randomUUID } from 'node:crypto';
 
 async function main() {
+  process.env.MAX_ACTIVE_SESSIONS_PER_USER = '3';
   const app = await createApp();
   await app.listen(0, '127.0.0.1');
   const address = app.getHttpServer().address() as AddressInfo;
@@ -49,10 +50,32 @@ async function main() {
     assert.equal(registration.status, 201);
     const registered = await registration.json() as { user: { id: string } };
     userId = registered.user.id;
-    const cookie = registration.headers.get('set-cookie');
+    const initialCookie = registration.headers.get('set-cookie');
+    let cookie = initialCookie;
     assert.ok(cookie?.includes('kickit_access='));
     assert.ok(cookie?.toLowerCase().includes('httponly'));
     assert.ok(cookie?.toLowerCase().includes('samesite=strict'));
+
+    const sessionCookies = [cookie];
+    for (let index = 0; index < 3; index++) {
+      const login = await fetch(`${base}/auth/login`, {
+        method: 'POST', headers: { 'content-type': 'application/json', connection: 'close' }, body: JSON.stringify({ email, password: 'Password1' }),
+      });
+      assert.equal(login.status, 201);
+      sessionCookies.push(login.headers.get('set-cookie'));
+      await login.arrayBuffer();
+    }
+    const newestCookie = sessionCookies.at(-1);
+    assert.ok(newestCookie);
+    cookie = newestCookie;
+    const prisma = app.get(PrismaService);
+    const activeSessionCount = await prisma.session.count({
+      where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+    });
+    assert.equal(activeSessionCount, 3, 'database-backed active sessions must be capped');
+    const evictedSession = await fetch(`${base}/auth/me`, { headers: { cookie: initialCookie!, connection: 'close' } });
+    assert.equal(evictedSession.status, 401, 'the oldest session must be revoked when the cap is exceeded');
+    await evictedSession.arrayBuffer();
 
     const profile = await fetch(`${base}/auth/me`, { headers: { cookie: cookie!, connection: 'close' } });
     assert.equal(profile.status, 200);
@@ -75,7 +98,6 @@ async function main() {
     assert.equal(new Set(openingBodies.map((opening) => opening.packOpeningId)).size, 1, 'concurrent idempotent requests must create one opening');
     assert.ok(openingBodies.every((opening) => opening.cards.length === 5));
     assert.ok(openingBodies.every((opening) => opening.user.coins === initialProfile.coins - 250), 'concurrent replay must debit once');
-    const prisma = app.get(PrismaService);
     const ledger = await prisma.economyTransaction.findMany({ where: { userId: registered.user.id }, orderBy: { createdAt: 'asc' } });
     const grants = ledger.filter((entry) => entry.reason === 'INITIAL_GRANT');
     assert.deepEqual(grants.map((entry) => [entry.currency, entry.amount, entry.balanceAfter]).sort(), [
