@@ -1,4 +1,4 @@
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -16,7 +16,7 @@ CMD ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy && node
 FROM build AS production-dependencies
 RUN npm prune --omit=dev
 
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 RUN addgroup -S kickit && adduser -S -G kickit kickit \
