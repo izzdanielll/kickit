@@ -7,98 +7,25 @@ import {
   LayoutGrid,
   LogOut,
   Package,
-  Search,
-  Shield,
   ShoppingBag,
   Sparkles,
   Trophy,
   Users,
   X,
-  CheckCircle,
-  AlertCircle,
   Tag,
   Info,
+  Trash2,
 } from 'lucide-react';
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { Logo } from '@/components/Logo';
+import { PlayTab } from '@/components/dashboard/PlayTab';
+import { apiRequest, errorMessage } from '@/lib/api';
+import type { ActiveSquad, Listing, PackDefinition, PlayerCard } from '@/lib/types';
+import { cardOverall, marketplaceParams } from '@/lib/dashboard-utils';
 
 type Tab = 'play' | 'club' | 'shop' | 'market' | 'squads';
-
-interface CardTemplate {
-  id: string;
-  playerName: string;
-  club: string;
-  league: string;
-  nationality: string;
-  position: 'GK' | 'DEF' | 'MID' | 'FWD';
-  rarity: 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' | 'MYTHIC';
-  baseAttack: number;
-  baseDefense: number;
-  basePace: number;
-  basePassing: number;
-  basePhysical: number;
-  specialTrait?: string;
-  season: string;
-}
-
-interface PlayerCard {
-  id: string;
-  ownerId: string;
-  templateId: string;
-  template: CardTemplate;
-  level: number;
-  xp: number;
-  isLocked: boolean;
-  acquiredAt?: string;
-  listings?: { id: string; price: number; currency: 'COINS' | 'GEMS' }[];
-}
-
-interface PackDefinition {
-  id: string;
-  type: string;
-  name: string;
-  coinCost: number | null;
-  gemCost: number | null;
-  cardCount: number;
-}
-
-interface Listing {
-  id: string;
-  cardId: string;
-  sellerId: string;
-  price: number;
-  currency: 'COINS' | 'GEMS';
-  status: string;
-  seller: { id: string; username: string };
-  card: PlayerCard;
-}
-
-interface SquadSlot {
-  slotIndex: number;
-  cardId: string;
-  card?: PlayerCard;
-}
-
-interface ActiveSquad {
-  id: string;
-  name: string;
-  formation: string;
-  squadCards: { id: string; slotIndex: number; card: PlayerCard }[];
-}
-
-interface Gameweek {
-  id: string;
-  number: number;
-  status: 'UPCOMING' | 'OPEN' | 'LOCKED' | 'SETTLING' | 'COMPLETED';
-  startTime: string;
-  lockTime: string;
-  endTime: string;
-  entry: { totalScore: number; rank: number | null } | null;
-}
-
-interface LeaderboardRow { rank: number; userId: string; username: string; totalScore: number }
 
 const PACK_ODDS: Record<string, { COMMON: string; RARE: string; EPIC: string; LEGENDARY: string; MYTHIC: string }> = {
   BRONZE: { COMMON: '70.0%', RARE: '20.0%', EPIC: '7.0%', LEGENDARY: '2.5%', MYTHIC: '0.5%' },
@@ -107,7 +34,7 @@ const PACK_ODDS: Record<string, { COMMON: string; RARE: string; EPIC: string; LE
   PROMO: { COMMON: '15.0%', RARE: '35.0%', EPIC: '30.0%', LEGENDARY: '15.0%', MYTHIC: '5.0%' },
 };
 
-type PlayerPosition = CardTemplate['position'];
+type PlayerPosition = PlayerCard['template']['position'];
 type CollectionSort =
   | 'newest'
   | 'oldest'
@@ -125,7 +52,7 @@ const FORMATION_POSITIONS: Record<string, PlayerPosition[]> = {
   '1-1-2': ['GK', 'DEF', 'MID', 'FWD', 'FWD'],
 };
 
-const RARITY_RANK: Record<CardTemplate['rarity'], number> = {
+const RARITY_RANK: Record<PlayerCard['template']['rarity'], number> = {
   COMMON: 1,
   RARE: 2,
   EPIC: 3,
@@ -133,16 +60,27 @@ const RARITY_RANK: Record<CardTemplate['rarity'], number> = {
   MYTHIC: 5,
 };
 
-const cardOverall = (card: PlayerCard) =>
-  Math.round(
-    (card.template.baseAttack +
-      card.template.baseDefense +
-      card.template.basePace +
-      card.template.basePassing +
-      card.template.basePhysical) /
-      5,
-  ) +
-  (card.level - 1);
+function SquadSocket({ label, card, onPick, onRemove, bench = false }: {
+  label: string;
+  card: PlayerCard | null;
+  onPick: () => void;
+  onRemove: () => void;
+  bench?: boolean;
+}) {
+  return (
+    <div
+      className={`pitch-socket ${card ? 'filled' : ''}`}
+      role="button"
+      tabIndex={0}
+      aria-label={`${card ? `Replace ${card.template.playerName}` : 'Select player'} for ${label}`}
+      onClick={onPick}
+      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onPick(); }}
+    >
+      <span className="socket-position-label">{label}</span>
+      {card ? <><div><b>{card.template.playerName}</b><small>{cardOverall(card)} OVR · tap to replace</small></div><button className="socket-remove" aria-label={`Remove ${card.template.playerName}`} onClick={(event) => { event.stopPropagation(); onRemove(); }}><Trash2 size={13} /></button></> : <span>+ {bench ? 'Bench' : `Select ${label}`}</span>}
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const { user, isLoading, logout, refreshUser, updateUserCoinsGems } = useAuth();
@@ -154,9 +92,7 @@ export default function DashboardPage() {
   const [packs, setPacks] = useState<PackDefinition[]>([]);
   const [listings, setListings] = useState<Listing[]>([]);
   const [myListings, setMyListings] = useState<Listing[]>([]);
-  const [squad, setSquad] = useState<ActiveSquad | null>(null);
-  const [gameweek, setGameweek] = useState<Gameweek | null>(null);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
+  const [purchasedListings, setPurchasedListings] = useState<Listing[]>([]);
 
   // Filters & Loading
   const [posFilter, setPosFilter] = useState<string>('ALL');
@@ -164,10 +100,25 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [collectionSort, setCollectionSort] = useState<CollectionSort>('newest');
   const [collectionStatus, setCollectionStatus] = useState<'ALL' | 'AVAILABLE' | 'LISTED'>('ALL');
-  const [marketTab, setMarketTab] = useState<'browse' | 'my-listings'>('browse');
+  const [marketTab, setMarketTab] = useState<'browse' | 'my-listings' | 'purchases'>('browse');
   const [marketNotice, setMarketNotice] = useState<string | null>(null);
   const [cancellingListingId, setCancellingListingId] = useState<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [marketSearch, setMarketSearch] = useState('');
+  const [marketClub, setMarketClub] = useState('');
+  const [debouncedMarketClub, setDebouncedMarketClub] = useState('');
+  const [debouncedMarketSearch, setDebouncedMarketSearch] = useState('');
+  const [marketPosition, setMarketPosition] = useState('ALL');
+  const [marketRarity, setMarketRarity] = useState('ALL');
+  const [marketCurrency, setMarketCurrency] = useState('ALL');
+  const [marketSort, setMarketSort] = useState('recent');
+  const [marketMinPrice, setMarketMinPrice] = useState('');
+  const [marketMaxPrice, setMarketMaxPrice] = useState('');
+  const [marketPage, setMarketPage] = useState(1);
+  const [marketHasMore, setMarketHasMore] = useState(false);
+  const [resourceState, setResourceState] = useState<Record<string, 'idle' | 'loading' | 'error'>>({});
+  const [resourceError, setResourceError] = useState<Record<string, string>>({});
+  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
 
   // Modals & Actions
   const [selectedCard, setSelectedCard] = useState<PlayerCard | null>(null);
@@ -189,80 +140,98 @@ export default function DashboardPage() {
   const [activePickerSlot, setActivePickerSlot] = useState<number | null>(null);
   const [savingSquad, setSavingSquad] = useState<boolean>(false);
   const [squadNotice, setSquadNotice] = useState<string | null>(null);
+  const [squadDirty, setSquadDirty] = useState(false);
 
   // Redirect unauthenticated users
   useEffect(() => {
     if (!isLoading && !user) router.push('/auth?mode=login');
   }, [user, isLoading, router]);
 
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedMarketSearch(marketSearch);
+      setDebouncedMarketClub(marketClub);
+      setMarketPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [marketClub, marketSearch]);
+
+  const beginResource = (name: string) => {
+    setResourceState((current) => ({ ...current, [name]: 'loading' }));
+    setResourceError((current) => ({ ...current, [name]: '' }));
+  };
+  const failResource = (name: string, cause: unknown) => {
+    setResourceState((current) => ({ ...current, [name]: 'error' }));
+    setResourceError((current) => ({ ...current, [name]: errorMessage(cause) }));
+  };
+  const finishResource = (name: string) => setResourceState((current) => ({ ...current, [name]: 'idle' }));
+
   // ── Data Fetching ───────────────────────────────────────────
   const fetchCollection = useCallback(async () => {
+    beginResource('cards');
     try {
-      const res = await fetch('/api/cards');
-      if (res.ok) setCards(await res.json());
-    } catch (e) {
-      console.error('Error fetching cards:', e);
+      setCards(await apiRequest<PlayerCard[]>('/api/cards?limit=100'));
+      finishResource('cards');
+    } catch (cause) {
+      failResource('cards', cause);
     }
   }, []);
 
   const fetchPacks = useCallback(async () => {
+    beginResource('packs');
     try {
-      const res = await fetch('/api/packs');
-      if (res.ok) setPacks(await res.json());
-    } catch (e) {
-      console.error('Error fetching packs:', e);
+      setPacks(await apiRequest<PackDefinition[]>('/api/packs'));
+      finishResource('packs');
+    } catch (cause) {
+      failResource('packs', cause);
     }
   }, []);
 
   const fetchMarket = useCallback(async () => {
+    beginResource('market');
     try {
-      const res = await fetch('/api/marketplace/listings');
-      if (res.ok) setListings(await res.json());
-      const myRes = await fetch('/api/marketplace/my-listings');
-      if (myRes.ok) setMyListings(await myRes.json());
-    } catch (e) {
-      console.error('Error fetching market:', e);
+      const params = marketplaceParams({ page: marketPage, search: debouncedMarketSearch, club: debouncedMarketClub, position: marketPosition, rarity: marketRarity, currency: marketCurrency, sort: marketSort, minPrice: marketMinPrice, maxPrice: marketMaxPrice });
+      const [available, mine, purchases] = await Promise.all([
+        apiRequest<Listing[]>(`/api/marketplace/listings?${params}`),
+        apiRequest<Listing[]>('/api/marketplace/my-listings?limit=100'),
+        apiRequest<Listing[]>('/api/marketplace/my-purchases?limit=100'),
+      ]);
+      setListings(available);
+      setMarketHasMore(available.length === 24);
+      setMyListings(mine);
+      setPurchasedListings(purchases);
+      finishResource('market');
+    } catch (cause) {
+      failResource('market', cause);
     }
-  }, []);
+  }, [debouncedMarketClub, debouncedMarketSearch, marketCurrency, marketMaxPrice, marketMinPrice, marketPage, marketPosition, marketRarity, marketSort]);
 
   const fetchSquad = useCallback(async () => {
+    beginResource('squad');
     try {
-      const res = await fetch('/api/squads/active');
-      if (res.ok) {
-        const data: ActiveSquad = await res.json();
-        setSquad(data);
-        if (data.formation) setSelectedFormation(data.formation);
-        const slots: (PlayerCard | null)[] = Array(7).fill(null);
-        data.squadCards?.forEach((sc) => {
-          if (sc.slotIndex >= 0 && sc.slotIndex < 7) {
-            slots[sc.slotIndex] = sc.card;
-          }
-        });
-        setSquadSlots(slots);
-      }
-    } catch (e) {
-      console.error('Error fetching squad:', e);
-    }
-  }, []);
-
-  const fetchGameweek = useCallback(async () => {
-    try {
-      const response = await fetch('/api/gameweeks/current', { cache: 'no-store' });
-      if (!response.ok) return;
-      const current: Gameweek | null = await response.json();
-      setGameweek(current);
-      if (!current) return setLeaderboard([]);
-      const leaderboardResponse = await fetch(`/api/gameweeks/${current.id}/leaderboard?limit=5`, { cache: 'no-store' });
-      if (leaderboardResponse.ok) setLeaderboard((await leaderboardResponse.json()).data);
-    } catch (error) {
-      console.error('Error fetching gameweek:', error);
+      const data = await apiRequest<ActiveSquad>('/api/squads/active');
+      if (data.formation) setSelectedFormation(data.formation);
+      const slots: (PlayerCard | null)[] = Array(7).fill(null);
+      data.squadCards?.forEach((sc) => {
+        if (sc.slotIndex >= 0 && sc.slotIndex < 7) slots[sc.slotIndex] = sc.card;
+      });
+      setSquadSlots(slots);
+      setSquadDirty(false);
+      finishResource('squad');
+    } catch (cause) {
+      failResource('squad', cause);
     }
   }, []);
 
   // Load data based on tab selection
   useEffect(() => {
     if (!user) return;
-    if (activeTab === 'play') void fetchGameweek();
     if (activeTab === 'club') void fetchCollection();
     if (activeTab === 'shop') void fetchPacks();
     if (activeTab === 'market') void fetchMarket();
@@ -270,7 +239,7 @@ export default function DashboardPage() {
       void fetchCollection();
       void fetchSquad();
     }
-  }, [activeTab, user, fetchCollection, fetchPacks, fetchMarket, fetchSquad, fetchGameweek]);
+  }, [activeTab, user, fetchCollection, fetchPacks, fetchMarket, fetchSquad]);
 
   // Keep My Club synchronized without a manual refresh control.
   useEffect(() => {
@@ -330,17 +299,8 @@ export default function DashboardPage() {
 
   // Filtered Market Listings
   const filteredListings = useMemo(() => {
-    return listings.filter((l) => {
-      if (l.sellerId === user?.id) return false;
-      if (posFilter !== 'ALL' && l.card.template.position !== posFilter) return false;
-      if (rarityFilter !== 'ALL' && l.card.template.rarity !== rarityFilter) return false;
-      if (searchQuery.trim()) {
-        const name = l.card.template.playerName.toLowerCase();
-        if (!name.includes(searchQuery.toLowerCase())) return false;
-      }
-      return true;
-    });
-  }, [listings, posFilter, rarityFilter, searchQuery, user?.id]);
+    return listings.filter((listing) => listing.sellerId !== user?.id);
+  }, [listings, user?.id]);
 
   // ── Actions ─────────────────────────────────────────────────
   const handleOpenPack = async (packId: string) => {
@@ -348,17 +308,10 @@ export default function DashboardPage() {
     const idempotencyKey = packRequestKeys.current.get(packId) ?? crypto.randomUUID();
     packRequestKeys.current.set(packId, idempotencyKey);
     try {
-      const res = await fetch('/api/packs/open', {
+      const data = await apiRequest<{ cards: PlayerCard[]; user?: { coins: number; gems: number } }>('/api/packs/open', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ packId, idempotencyKey }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        packRequestKeys.current.delete(packId);
-        alert(data.message || 'Failed to open pack');
-        return;
-      }
       setRevealedCards(data.cards);
       packRequestKeys.current.delete(packId);
       if (data.user) {
@@ -366,8 +319,9 @@ export default function DashboardPage() {
       } else {
         await refreshUser();
       }
-    } catch (e) {
-      alert('Error opening pack');
+      setToast({ message: 'Pack opened. Your new cards are safely in My Club.', tone: 'success' });
+    } catch (cause) {
+      setToast({ message: errorMessage(cause, 'Unable to open the pack.'), tone: 'error' });
     } finally {
       setOpeningPack(false);
     }
@@ -377,25 +331,19 @@ export default function DashboardPage() {
     if (!selectedCard) return;
     setIsSelling(true);
     try {
-      const res = await fetch('/api/marketplace/listings', {
+      await apiRequest<Listing>('/api/marketplace/listings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           cardId: selectedCard.id,
           price: Number(sellPrice),
           currency: sellCurrency,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.message || 'Failed to create listing');
-        return;
-      }
-      alert('Card successfully listed on the Marketplace!');
+      setToast({ message: 'Card listed successfully.', tone: 'success' });
       setSelectedCard(null);
       void fetchCollection();
-    } catch (e) {
-      alert('Error creating listing');
+    } catch (cause) {
+      setToast({ message: errorMessage(cause, 'Unable to list this card.'), tone: 'error' });
     } finally {
       setIsSelling(false);
     }
@@ -405,26 +353,21 @@ export default function DashboardPage() {
     if (!buyingListing) return;
     if (buyingListing.sellerId === user?.id) {
       setBuyingListing(null);
-      alert('You cannot purchase your own listing. Use My Listings to cancel it.');
+      setToast({ message: 'Use My Listings to cancel your own listing.', tone: 'error' });
       return;
     }
     setIsPurchasing(true);
     try {
-      const res = await fetch(`/api/marketplace/buy/${buyingListing.id}`, {
+      const data = await apiRequest<{ user?: { coins: number; gems: number } }>(`/api/marketplace/buy/${buyingListing.id}`, {
         method: 'POST',
       });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.message || 'Purchase failed');
-        return;
-      }
-      alert('Purchase successful! Card added to your collection.');
+      setToast({ message: 'Purchase complete. The card is now in My Club.', tone: 'success' });
       setBuyingListing(null);
       if (data.user) updateUserCoinsGems(data.user.coins, data.user.gems);
       else await refreshUser();
       void fetchMarket();
-    } catch (e) {
-      alert('Error purchasing listing');
+    } catch (cause) {
+      setToast({ message: errorMessage(cause, 'Unable to complete the purchase.'), tone: 'error' });
     } finally {
       setIsPurchasing(false);
     }
@@ -434,22 +377,13 @@ export default function DashboardPage() {
     setCancellingListingId(id);
     setMarketNotice(null);
     try {
-      const res = await fetch(`/api/marketplace/listings/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (res.ok) {
-        setMyListings((current) =>
-          current.map((listing) =>
-            listing.id === id ? { ...listing, status: 'CANCELLED' } : listing,
-          ),
-        );
-        setListings((current) => current.filter((listing) => listing.id !== id));
-        setMarketNotice('Listing cancelled successfully.');
-        await fetchMarket();
-      } else {
-        setMarketNotice(data.message || 'Unable to cancel the listing.');
-      }
-    } catch (e) {
-      setMarketNotice('Unable to cancel the listing. Please try again.');
+      await apiRequest<Listing>(`/api/marketplace/listings/${id}`, { method: 'DELETE' });
+      setMyListings((current) => current.map((listing) => listing.id === id ? { ...listing, status: 'CANCELLED' } : listing));
+      setListings((current) => current.filter((listing) => listing.id !== id));
+      setMarketNotice('Listing cancelled successfully.');
+      await fetchMarket();
+    } catch (cause) {
+      setMarketNotice(errorMessage(cause, 'Unable to cancel the listing.'));
     } finally {
       setCancellingListingId(null);
     }
@@ -471,23 +405,18 @@ export default function DashboardPage() {
         .map((card, idx) => (card ? { slotIndex: idx, cardId: card.id } : null))
         .filter(Boolean);
 
-      const res = await fetch('/api/squads/save', {
+      const data = await apiRequest<{ avgOvr: number; ratingCap: number }>('/api/squads/save', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           formation: selectedFormation,
           slots: slotsToSave,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setSquadNotice(`❌ ${data.message || 'Failed to save squad'}`);
-        return;
-      }
-      setSquadNotice(`✅ Squad saved! Avg OVR: ${data.avgOvr} (Cap: ${data.ratingCap})`);
+      setSquadNotice(`Squad saved! Avg OVR: ${data.avgOvr} (Cap: ${data.ratingCap})`);
+      setToast({ message: 'Your active squad has been saved.', tone: 'success' });
       void fetchSquad();
-    } catch (e) {
-      setSquadNotice('❌ Error saving squad');
+    } catch (cause) {
+      setSquadNotice(errorMessage(cause, 'Unable to save the squad.'));
     } finally {
       setSavingSquad(false);
     }
@@ -503,7 +432,28 @@ export default function DashboardPage() {
       }),
     );
     setSquadNotice(null);
+    setSquadDirty(true);
   };
+
+  useEffect(() => {
+    if (!squadDirty) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [squadDirty]);
+
+  useEffect(() => {
+    const modalOpen = Boolean(selectedCard || revealedCards || buyingListing || activePickerSlot !== null || selectedOddsPack);
+    if (!modalOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const close = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setSelectedCard(null); setRevealedCards(null); setBuyingListing(null); setActivePickerSlot(null); setSelectedOddsPack(null);
+    };
+    window.addEventListener('keydown', close);
+    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener('keydown', close); };
+  }, [activePickerSlot, buyingListing, revealedCards, selectedCard, selectedOddsPack]);
 
   // Compute Squad Average OVR
   const starterCards = squadSlots.slice(0, 5).filter(Boolean) as PlayerCard[];
@@ -528,6 +478,7 @@ export default function DashboardPage() {
 
   return (
     <main className="club-shell">
+      {toast && <div className={`app-toast toast-${toast.tone}`} role="status" aria-live="polite">{toast.message}<button aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={15} /></button></div>}
       {/* Sidebar Navigation */}
       <aside className="club-sidebar">
         <div className="club-brand" style={{ cursor: 'pointer', marginBottom: '20px' }} onClick={() => router.push('/')}>
@@ -579,12 +530,11 @@ export default function DashboardPage() {
             <Logo variant="full" size="sm" showTagline={false} />
           </div>
           <div className="topbar-spacer" />
-          <button className="topbar-icon" aria-label="Rewards"><Trophy size={18} /></button>
-          <button className="profile-menu">
+          <div className="level-progress" aria-label={`Level ${user.level ?? 1}, ${user.xp ?? 0} experience points`}><Trophy size={16} /><span>Level {user.level ?? 1}</span><small>{user.xp ?? 0} XP</small></div>
+          <div className="profile-menu">
             <span className="profile-avatar">{user.username.charAt(0).toUpperCase()}</span>
             <b>{user.username}</b>
-            <span>⌄</span>
-          </button>
+          </div>
           <button
             className="topbar-icon logout-icon"
             onClick={handleLogout}
@@ -597,29 +547,7 @@ export default function DashboardPage() {
 
         {/* TAB 1: PLAY */}
         {activeTab === 'play' && (
-          <div className="pitch-stage">
-            <div className="pitch-crowd" aria-hidden="true" />
-            <div className="pitch-lines" aria-hidden="true"><span /><i /><b /></div>
-            <section className="play-panel animate-fade-in">
-              <div className="play-kicker"><Sparkles size={15} /> KickIt tournaments</div>
-              <h1>YOUR CLUB.<br /><span>YOUR GLORY.</span></h1>
-              <p>Choose a competition, build your 5-a-side, and turn real-world football into points.</p>
-              <div className="competition-card available">
-                <div className="competition-banner"><span className="competition-badge">{gameweek?.status ?? 'SCHEDULED'}</span><span>GAMEWEEK {String(gameweek?.number ?? 1).padStart(2, '0')}</span></div>
-                <div className="competition-body"><Trophy size={25} /><div><b>Rising Stars Cup</b><small>{gameweek ? `Squad lock: ${new Date(gameweek.lockTime).toLocaleString()}` : 'The next gameweek is being scheduled'}</small></div></div>
-                {gameweek?.entry && <div className="competition-body"><Users size={22} /><div><b>Your rank: {gameweek.entry.rank ? `#${gameweek.entry.rank}` : 'Pending'}</b><small>{gameweek.entry.totalScore} points</small></div></div>}
-                {leaderboard.length > 0 && <div className="competition-body"><Trophy size={22} /><div><b>Leaders</b><small>{leaderboard.map((row) => `${row.rank}. ${row.username} (${row.totalScore})`).join(' · ')}</small></div></div>}
-              </div>
-              <div className="competition-card locked">
-                <div className="competition-banner"><span>COMING NEXT</span></div>
-                <div className="competition-body"><Shield size={25} /><div><b>Champions Circuit</b><small>Opens after Gameweek 01</small></div></div>
-              </div>
-              <button className="btn btn-primary play-cta" onClick={() => setActiveTab('squads')}>
-                Build my squad <span>→</span>
-              </button>
-            </section>
-            <div className="stage-caption"><span className="pulse-dot" /> LIVE GAMEWEEK · BUILD BEFORE FRIDAY 18:00 UTC</div>
-          </div>
+          <PlayTab userId={user.id} onBuildSquad={() => setActiveTab('squads')} />
         )}
 
         {/* TAB 2: MY CLUB (COLLECTION) */}
@@ -703,7 +631,10 @@ export default function DashboardPage() {
             </div>
 
             {/* Collection Grid */}
-            <div className="cards-grid">
+            {resourceState.cards === 'error' && <div className="inline-error" role="alert">{resourceError.cards}<button onClick={() => void fetchCollection()}>Retry</button></div>}
+            {resourceState.cards === 'loading' && !cards.length && <div className="skeleton-grid"><div /><div /><div /></div>}
+            {resourceState.cards === 'idle' && !filteredCards.length && <div className="empty-panel"><LayoutGrid size={28} /><h2>No cards found</h2><p>Adjust your filters or open a pack to grow your club.</p><button className="btn btn-primary" onClick={() => setActiveTab('shop')}>Visit pack shop</button></div>}
+            <div className="cards-grid" aria-busy={resourceState.cards === 'loading'}>
               {filteredCards.map((card) => {
                 const ovr = cardOverall(card);
 
@@ -744,6 +675,9 @@ export default function DashboardPage() {
             </div>
 
             <div className="packs-grid">
+              {resourceState.packs === 'error' && <div className="inline-error" role="alert">{resourceError.packs}<button onClick={() => void fetchPacks()}>Retry</button></div>}
+              {resourceState.packs === 'loading' && !packs.length && <div className="skeleton-grid"><div /><div /><div /></div>}
+              {resourceState.packs === 'idle' && !packs.length && <div className="empty-panel"><Package size={28} /><h2>No packs available</h2><p>The shop is being restocked. Please check again soon.</p></div>}
               {packs.map((pack) => (
                 <div key={pack.id} className="pack-card" style={{ position: 'relative' }}>
                   <button
@@ -800,6 +734,12 @@ export default function DashboardPage() {
                 >
                   My Listings ({myListings.length})
                 </button>
+                <button
+                  className={`filter-pill ${marketTab === 'purchases' ? 'active' : ''}`}
+                  onClick={() => setMarketTab('purchases')}
+                >
+                  Purchases ({purchasedListings.length})
+                </button>
               </div>
             </div>
             {marketNotice && (
@@ -816,31 +756,52 @@ export default function DashboardPage() {
                 {marketNotice}
               </div>
             )}
+            {resourceState.market === 'error' && <div className="inline-error" role="alert">{resourceError.market}<button onClick={() => void fetchMarket()}>Retry</button></div>}
 
             {marketTab === 'browse' ? (
               <>
                 <div className="filters-bar">
                   <input
                     type="text"
-                    placeholder="Search market by player..."
+                    placeholder="Search player name..."
                     className="filter-search"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    value={marketSearch}
+                    onChange={(e) => setMarketSearch(e.target.value)}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Filter by club..."
+                    className="filter-search"
+                    value={marketClub}
+                    onChange={(event) => setMarketClub(event.target.value)}
                   />
                   <div className="filter-pill-group">
                     {['ALL', 'GK', 'DEF', 'MID', 'FWD'].map((pos) => (
                       <button
                         key={pos}
-                        className={`filter-pill ${posFilter === pos ? 'active' : ''}`}
-                        onClick={() => setPosFilter(pos)}
+                        className={`filter-pill ${marketPosition === pos ? 'active' : ''}`}
+                        onClick={() => { setMarketPosition(pos); setMarketPage(1); }}
                       >
                         {pos}
                       </button>
                     ))}
                   </div>
+                  <select aria-label="Market rarity" value={marketRarity} onChange={(event) => { setMarketRarity(event.target.value); setMarketPage(1); }}>
+                    <option value="ALL">All rarities</option><option value="COMMON">Common</option><option value="RARE">Rare</option><option value="EPIC">Epic</option><option value="LEGENDARY">Legendary</option><option value="MYTHIC">Mythic</option>
+                  </select>
+                  <select aria-label="Market currency" value={marketCurrency} onChange={(event) => { setMarketCurrency(event.target.value); setMarketPage(1); }}>
+                    <option value="ALL">All currencies</option><option value="COINS">Coins</option><option value="GEMS">Gems</option>
+                  </select>
+                  <input aria-label="Minimum price" className="price-filter" type="number" min="1" placeholder="Min price" value={marketMinPrice} onChange={(event) => { setMarketMinPrice(event.target.value); setMarketPage(1); }} />
+                  <input aria-label="Maximum price" className="price-filter" type="number" min="1" placeholder="Max price" value={marketMaxPrice} onChange={(event) => { setMarketMaxPrice(event.target.value); setMarketPage(1); }} />
+                  <select aria-label="Sort marketplace" value={marketSort} onChange={(event) => { setMarketSort(event.target.value); setMarketPage(1); }}>
+                    <option value="recent">Newest</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option><option value="rarity_desc">Rarest first</option>
+                  </select>
                 </div>
 
-                <div className="marketplace-grid">
+                {resourceState.market === 'loading' && !listings.length && <div className="skeleton-grid"><div /><div /><div /></div>}
+                {resourceState.market === 'idle' && !filteredListings.length && <div className="empty-panel"><ShoppingBag size={28} /><h2>No matching listings</h2><p>Try widening the filters or check back after other managers list cards.</p></div>}
+                <div className="marketplace-grid" aria-busy={resourceState.market === 'loading'}>
                   {filteredListings.map((listing) => {
                     const c = listing.card;
                     const ovr = Math.round(
@@ -884,9 +845,15 @@ export default function DashboardPage() {
                     );
                   })}
                 </div>
+                <div className="pagination-controls">
+                  <button className="btn btn-ghost" disabled={marketPage === 1 || resourceState.market === 'loading'} onClick={() => setMarketPage((page) => Math.max(1, page - 1))}>Previous</button>
+                  <span>Page {marketPage}</span>
+                  <button className="btn btn-ghost" disabled={!marketHasMore || resourceState.market === 'loading'} onClick={() => setMarketPage((page) => page + 1)}>Next</button>
+                </div>
               </>
-            ) : (
+            ) : marketTab === 'my-listings' ? (
               <div className="marketplace-grid">
+                {resourceState.market === 'idle' && !myListings.length && <div className="empty-panel"><Tag size={28} /><h2>No listing history</h2><p>Select an available card in My Club to put it on the market.</p></div>}
                 {myListings.map((listing) => {
                   const c = listing.card;
                   return (
@@ -916,6 +883,20 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
+            ) : (
+              <div className="marketplace-grid">
+                {resourceState.market === 'idle' && !purchasedListings.length && <div className="empty-panel"><ShoppingBag size={28} /><h2>No purchases yet</h2><p>Cards you buy from other managers will appear here.</p></div>}
+                {purchasedListings.map((listing) => (
+                  <div key={listing.id} className="card-item">
+                    <article className={`tcg-card standalone ${listing.card.template.rarity.toLowerCase()}`}>
+                      <div className="tcg-card-top"><span>BOUGHT</span><Tag size={15} /></div>
+                      <div className="player-silhouette">⚽</div>
+                      <div className="tcg-card-meta"><strong>{cardOverall(listing.card)}</strong><div><b>{listing.card.template.playerName}</b><span>{listing.card.template.position} · from {listing.seller.username}</span></div></div>
+                    </article>
+                    <div className="listing-card-footer"><span className="price-tag">{listing.price} {listing.currency}</span><small>{listing.updatedAt ? new Date(listing.updatedAt).toLocaleDateString() : 'Completed'}</small></div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -927,7 +908,7 @@ export default function DashboardPage() {
               <div className="squad-controls-bar">
                 <div>
                   <h2>5-a-Side Squad Builder</h2>
-                  <small style={{ color: '#94a3b8' }}>Formation: {selectedFormation}</small>
+                  <small style={{ color: '#94a3b8' }}>{starterCards.length}/5 starters · 2 optional substitutes {squadDirty ? '· Unsaved changes' : ''}</small>
                 </div>
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                   <select
@@ -943,13 +924,18 @@ export default function DashboardPage() {
                   <div className="ovr-meter-container">
                     <span>Avg OVR:</span>
                     <span className={`ovr-badge ${squadAvgOvr > 85 ? 'over-cap' : ''}`}>{squadAvgOvr} / 85 Cap</span>
+                    <small>{Math.max(0, 85 - squadAvgOvr)} OVR remaining</small>
                   </div>
 
-                  <button className="btn btn-primary" disabled={savingSquad} onClick={handleSaveSquad}>
+                  <button className="btn btn-primary" disabled={savingSquad || starterCards.length !== 5 || squadAvgOvr > 85 || !squadDirty} onClick={handleSaveSquad}>
                     {savingSquad ? 'Saving...' : 'Save Squad'}
                   </button>
                 </div>
               </div>
+
+              {resourceState.squad === 'error' && <div className="inline-error" role="alert">{resourceError.squad}<button onClick={() => void fetchSquad()}>Retry</button></div>}
+              {starterCards.length !== 5 && <div className="squad-guidance">Fill every starting position before saving.</div>}
+              {squadAvgOvr > 85 && <div className="inline-error" role="alert">Your starting average is above the 85 OVR competition cap. Replace a starter with a lower-rated card.</div>}
 
               {squadNotice && (
                 <div style={{ background: 'rgba(255,255,255,0.06)', padding: '10px 16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
@@ -961,70 +947,29 @@ export default function DashboardPage() {
               <div className="pitch-socket-board">
                 {/* Row 1: Forward(s) */}
                 <div className="pitch-row">
-                  <div className="pitch-socket filled" onClick={() => setActivePickerSlot(4)}>
-                    <span className="socket-position-label">{FORMATION_POSITIONS[selectedFormation][4]}</span>
-                    {squadSlots[4] ? (
-                      <div><b>{squadSlots[4]!.template.playerName}</b></div>
-                    ) : (
-                      <span>+ Select {FORMATION_POSITIONS[selectedFormation][4]}</span>
-                    )}
-                  </div>
+                  <SquadSocket label={FORMATION_POSITIONS[selectedFormation][4]} card={squadSlots[4]} onPick={() => setActivePickerSlot(4)} onRemove={() => { setSquadSlots((slots) => slots.map((card, index) => index === 4 ? null : card)); setSquadDirty(true); }} />
                 </div>
 
                 {/* Row 2: Midfielder(s) */}
                 <div className="pitch-row">
-                  <div className="pitch-socket filled" onClick={() => setActivePickerSlot(2)}>
-                    <span className="socket-position-label">{FORMATION_POSITIONS[selectedFormation][2]}</span>
-                    {squadSlots[2] ? (
-                      <div><b>{squadSlots[2]!.template.playerName}</b></div>
-                    ) : (
-                      <span>+ Select {FORMATION_POSITIONS[selectedFormation][2]}</span>
-                    )}
-                  </div>
-                  <div className="pitch-socket filled" onClick={() => setActivePickerSlot(3)}>
-                    <span className="socket-position-label">{FORMATION_POSITIONS[selectedFormation][3]}</span>
-                    {squadSlots[3] ? (
-                      <div><b>{squadSlots[3]!.template.playerName}</b></div>
-                    ) : (
-                      <span>+ Select {FORMATION_POSITIONS[selectedFormation][3]}</span>
-                    )}
-                  </div>
+                  <SquadSocket label={FORMATION_POSITIONS[selectedFormation][2]} card={squadSlots[2]} onPick={() => setActivePickerSlot(2)} onRemove={() => { setSquadSlots((slots) => slots.map((card, index) => index === 2 ? null : card)); setSquadDirty(true); }} />
+                  <SquadSocket label={FORMATION_POSITIONS[selectedFormation][3]} card={squadSlots[3]} onPick={() => setActivePickerSlot(3)} onRemove={() => { setSquadSlots((slots) => slots.map((card, index) => index === 3 ? null : card)); setSquadDirty(true); }} />
                 </div>
 
                 {/* Row 3: Defender(s) */}
                 <div className="pitch-row">
-                  <div className="pitch-socket filled" onClick={() => setActivePickerSlot(1)}>
-                    <span className="socket-position-label">{FORMATION_POSITIONS[selectedFormation][1]}</span>
-                    {squadSlots[1] ? (
-                      <div><b>{squadSlots[1]!.template.playerName}</b></div>
-                    ) : (
-                      <span>+ Select {FORMATION_POSITIONS[selectedFormation][1]}</span>
-                    )}
-                  </div>
+                  <SquadSocket label={FORMATION_POSITIONS[selectedFormation][1]} card={squadSlots[1]} onPick={() => setActivePickerSlot(1)} onRemove={() => { setSquadSlots((slots) => slots.map((card, index) => index === 1 ? null : card)); setSquadDirty(true); }} />
                 </div>
 
                 {/* Row 4: Goalkeeper */}
                 <div className="pitch-row">
-                  <div className="pitch-socket filled" onClick={() => setActivePickerSlot(0)}>
-                    <span className="socket-position-label">{FORMATION_POSITIONS[selectedFormation][0]}</span>
-                    {squadSlots[0] ? (
-                      <div><b>{squadSlots[0]!.template.playerName}</b></div>
-                    ) : (
-                      <span>+ Select {FORMATION_POSITIONS[selectedFormation][0]}</span>
-                    )}
-                  </div>
+                  <SquadSocket label={FORMATION_POSITIONS[selectedFormation][0]} card={squadSlots[0]} onPick={() => setActivePickerSlot(0)} onRemove={() => { setSquadSlots((slots) => slots.map((card, index) => index === 0 ? null : card)); setSquadDirty(true); }} />
                 </div>
 
                 {/* Substitutes Bench */}
                 <div className="subs-bench-row">
-                  <div className="pitch-socket" onClick={() => setActivePickerSlot(5)}>
-                    <span className="socket-position-label">SUB 1</span>
-                    {squadSlots[5] ? <div><b>{squadSlots[5]!.template.playerName}</b></div> : <span>+ Bench</span>}
-                  </div>
-                  <div className="pitch-socket" onClick={() => setActivePickerSlot(6)}>
-                    <span className="socket-position-label">SUB 2</span>
-                    {squadSlots[6] ? <div><b>{squadSlots[6]!.template.playerName}</b></div> : <span>+ Bench</span>}
-                  </div>
+                  <SquadSocket bench label="SUB 1" card={squadSlots[5]} onPick={() => setActivePickerSlot(5)} onRemove={() => { setSquadSlots((slots) => slots.map((card, index) => index === 5 ? null : card)); setSquadDirty(true); }} />
+                  <SquadSocket bench label="SUB 2" card={squadSlots[6]} onPick={() => setActivePickerSlot(6)} onRemove={() => { setSquadSlots((slots) => slots.map((card, index) => index === 6 ? null : card)); setSquadDirty(true); }} />
                 </div>
               </div>
             </div>
@@ -1034,7 +979,7 @@ export default function DashboardPage() {
         {/* CARD DETAIL & SELL MODAL */}
         {selectedCard && (
           <div className="modal-overlay" onClick={() => setSelectedCard(null)}>
-            <div className="modal-card-dialog animate-fade-in" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-card-dialog animate-fade-in" role="dialog" aria-modal="true" aria-label="Card details" onClick={(e) => e.stopPropagation()}>
               <button className="modal-close" onClick={() => setSelectedCard(null)}><X size={20} /></button>
               <div className="card-detail-layout">
                 <h2>{selectedCard.template.playerName}</h2>
@@ -1080,7 +1025,7 @@ export default function DashboardPage() {
         {/* GACHA PACK REVEAL MODAL */}
         {revealedCards && (
           <div className="modal-overlay" onClick={() => setRevealedCards(null)}>
-            <div className="modal-card-dialog animate-fade-in" style={{ width: 'min(100%, 750px)' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-card-dialog animate-fade-in" role="dialog" aria-modal="true" aria-label="Pack results" style={{ width: 'min(100%, 750px)' }} onClick={(e) => e.stopPropagation()}>
               <button className="modal-close" onClick={() => setRevealedCards(null)}><X size={20} /></button>
               <div className="gacha-reveal-stage">
                 <Sparkles size={40} color="#facc15" />
@@ -1109,11 +1054,12 @@ export default function DashboardPage() {
         {/* BUY CONFIRMATION MODAL */}
         {buyingListing && (
           <div className="modal-overlay" onClick={() => setBuyingListing(null)}>
-            <div className="modal-card-dialog animate-fade-in" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-card-dialog animate-fade-in" role="dialog" aria-modal="true" aria-label="Confirm card purchase" onClick={(e) => e.stopPropagation()}>
               <button className="modal-close" onClick={() => setBuyingListing(null)}><X size={20} /></button>
               <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <h2>Buy {buyingListing.card.template.playerName}?</h2>
                 <p>Price: <b>{buyingListing.price} {buyingListing.currency}</b></p>
+                <small className="purchase-note">You pay the displayed price. A 5% marketplace tax is deducted from the seller&apos;s proceeds.</small>
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
                   <button className="btn btn-ghost" onClick={() => setBuyingListing(null)}>Cancel</button>
                   <button className="btn btn-primary" disabled={isPurchasing} onClick={handleBuyListing}>
@@ -1128,7 +1074,7 @@ export default function DashboardPage() {
         {/* SQUAD CARD PICKER MODAL */}
         {activePickerSlot !== null && (
           <div className="modal-overlay" onClick={() => setActivePickerSlot(null)}>
-            <div className="modal-card-dialog animate-fade-in" style={{ width: 'min(100%, 600px)' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-card-dialog animate-fade-in" role="dialog" aria-modal="true" aria-label="Select squad card" style={{ width: 'min(100%, 600px)' }} onClick={(e) => e.stopPropagation()}>
               <button className="modal-close" onClick={() => setActivePickerSlot(null)}><X size={20} /></button>
               <h2>
                 Select {activePickerSlot < 5
@@ -1157,6 +1103,7 @@ export default function DashboardPage() {
                         const newSlots = [...squadSlots];
                         newSlots[activePickerSlot] = card;
                         setSquadSlots(newSlots);
+                        setSquadDirty(true);
                         setActivePickerSlot(null);
                       }}
                     >
@@ -1175,7 +1122,7 @@ export default function DashboardPage() {
         {/* PACK ODDS INFO MODAL */}
         {selectedOddsPack && (
           <div className="modal-overlay animate-fade-in" onClick={() => setSelectedOddsPack(null)}>
-            <div className="modal-card-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-card-dialog" role="dialog" aria-modal="true" aria-label="Pack rarity odds" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
                 className="modal-close"

@@ -153,6 +153,10 @@ export class SquadsService {
     if (new Set(cardIds).size !== cardIds.length) {
       throw new BadRequestException('Cannot place the same card in multiple slots');
     }
+    const slotIndexes = dto.slots.map((slot) => slot.slotIndex);
+    if (new Set(slotIndexes).size !== slotIndexes.length) {
+      throw new BadRequestException('Cannot assign multiple cards to the same squad slot');
+    }
 
     if (!this.prisma.isDbConnected) {
       const userCards = Array.from(this.prisma.memStore.cards.values()).filter(
@@ -193,6 +197,9 @@ export class SquadsService {
         }
       }
       const avgOvr = totalOvr / starterSlots.length;
+      if (avgOvr > 85) {
+        throw new BadRequestException(`Starting squad average OVR ${Math.round(avgOvr)} exceeds the 85 cap`);
+      }
 
       const squadCards = dto.slots.map((s) => ({
         id: `sc_${s.cardId}`,
@@ -259,6 +266,9 @@ export class SquadsService {
       totalOvr += baseOvr + (card.level - 1);
     }
     const avgOvr = totalOvr / starterSlots.length;
+    if (avgOvr > 85) {
+      throw new BadRequestException(`Starting squad average OVR ${Math.round(avgOvr)} exceeds the 85 cap`);
+    }
 
     return runSerializable(this.prisma, async (tx) => {
       const lockedGameweek = await tx.gameweek.findFirst({

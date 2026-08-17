@@ -17,6 +17,9 @@ export class MarketplaceService {
   constructor(private prisma: PrismaService) {}
 
   async getListings(userId: string, filters: MarketplaceQueryDto) {
+    if (filters.minPrice !== undefined && filters.maxPrice !== undefined && filters.minPrice > filters.maxPrice) {
+      throw new BadRequestException('Minimum price cannot be greater than maximum price');
+    }
     if (!this.prisma.isDbConnected) {
       let listings = Array.from(this.prisma.memStore.listings.values()).filter(
         (l) => l.status === 'ACTIVE' && l.sellerId !== userId,
@@ -36,6 +39,18 @@ export class MarketplaceService {
         listings = listings.filter((l) =>
           l.card.template.playerName.toLowerCase().includes(query),
         );
+      }
+      if (filters?.club?.trim()) {
+        const club = filters.club.trim().toLowerCase();
+        listings = listings.filter((l) => l.card.template.club.toLowerCase().includes(club));
+      }
+      if (filters?.minPrice !== undefined) listings = listings.filter((l) => l.price >= filters.minPrice!);
+      if (filters?.maxPrice !== undefined) listings = listings.filter((l) => l.price <= filters.maxPrice!);
+      if (filters?.sort === 'price_asc') listings.sort((a, b) => a.price - b.price);
+      if (filters?.sort === 'price_desc') listings.sort((a, b) => b.price - a.price);
+      if (filters?.sort === 'rarity_desc') {
+        const order = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'MYTHIC'];
+        listings.sort((a, b) => order.indexOf(b.card.template.rarity) - order.indexOf(a.card.template.rarity));
       }
       const start = (filters.page - 1) * filters.limit;
       return listings.slice(start, start + filters.limit);
@@ -74,9 +89,27 @@ export class MarketplaceService {
       };
     }
 
+    if (filters?.club) {
+      where.card = {
+        ...where.card,
+        template: {
+          ...(where.card?.template ?? {}),
+          club: { contains: filters.club, mode: 'insensitive' },
+        },
+      };
+    }
+
+    if (filters?.minPrice !== undefined || filters?.maxPrice !== undefined) {
+      where.price = {
+        ...(filters.minPrice !== undefined ? { gte: filters.minPrice } : {}),
+        ...(filters.maxPrice !== undefined ? { lte: filters.maxPrice } : {}),
+      };
+    }
+
     let orderBy: any = { createdAt: 'desc' };
     if (filters?.sort === 'price_asc') orderBy = { price: 'asc' };
     if (filters?.sort === 'price_desc') orderBy = { price: 'desc' };
+    if (filters?.sort === 'rarity_desc') orderBy = { card: { template: { rarity: 'desc' } } };
 
     const listings = await this.prisma.marketplaceListing.findMany({
       where,
@@ -118,6 +151,26 @@ export class MarketplaceService {
         },
       },
       orderBy: { createdAt: 'desc' },
+      skip: (pagination.page - 1) * pagination.limit,
+      take: pagination.limit,
+    });
+  }
+
+  async getMyPurchases(userId: string, pagination: PaginationDto = new PaginationDto()) {
+    if (!this.prisma.isDbConnected) {
+      const listings = Array.from(this.prisma.memStore.listings.values())
+        .filter((listing) => listing.buyerId === userId && listing.status === 'COMPLETED');
+      const start = (pagination.page - 1) * pagination.limit;
+      return listings.slice(start, start + pagination.limit);
+    }
+
+    return this.prisma.marketplaceListing.findMany({
+      where: { buyerId: userId, status: ListingStatus.COMPLETED },
+      include: {
+        card: { include: { template: true } },
+        seller: { select: { id: true, username: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
       skip: (pagination.page - 1) * pagination.limit,
       take: pagination.limit,
     });

@@ -23,6 +23,74 @@ export class GameweeksService {
     return { ...gameweek, entry };
   }
 
+  async history(userId: string, page: number, limit: number) {
+    if (!this.prisma.isDbConnected) return [];
+    const gameweeks = await this.prisma.gameweek.findMany({
+      where: { status: GameweekStatus.COMPLETED },
+      orderBy: { number: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+      include: {
+        entries: {
+          where: { userId },
+          select: { totalScore: true, rank: true },
+          take: 1,
+        },
+      },
+    });
+    return gameweeks.map(({ entries, ...gameweek }) => ({
+      ...gameweek,
+      entry: entries[0] ?? null,
+    }));
+  }
+
+  async entryDetails(userId: string, gameweekId: string) {
+    if (!this.prisma.isDbConnected) return null;
+    const entry = await this.prisma.tournamentEntry.findUnique({
+      where: { userId_gameweekId: { userId, gameweekId } },
+      select: {
+        id: true,
+        totalScore: true,
+        rank: true,
+        cards: {
+          orderBy: { slotIndex: 'asc' },
+          select: {
+            slotIndex: true,
+            multiplierBps: true,
+            template: {
+              select: {
+                playerName: true,
+                position: true,
+                rarity: true,
+                weeklyScores: {
+                  where: { gameweekId },
+                  select: { totalPoints: true },
+                  take: 1,
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!entry) return null;
+    return {
+      entry: { id: entry.id, totalScore: entry.totalScore, rank: entry.rank },
+      cards: entry.cards.map((card) => {
+        const basePoints = card.template.weeklyScores[0]?.totalPoints ?? 0;
+        return {
+          slotIndex: card.slotIndex,
+          playerName: card.template.playerName,
+          position: card.template.position,
+          rarity: card.template.rarity,
+          basePoints,
+          multiplier: card.multiplierBps / 10_000,
+          totalPoints: Math.round(basePoints * card.multiplierBps / 10_000),
+        };
+      }),
+    };
+  }
+
   async leaderboard(gameweekId: string, page: number, limit: number) {
     if (!this.prisma.isDbConnected) return { data: [], page, limit };
     const exists = await this.prisma.gameweek.findUnique({ where: { id: gameweekId }, select: { id: true, updatedAt: true } });

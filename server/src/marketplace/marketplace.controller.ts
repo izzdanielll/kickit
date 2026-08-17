@@ -33,6 +33,11 @@ export class MarketplaceController {
     return this.marketplaceService.getMyListings(user.id, query);
   }
 
+  @Get('my-purchases')
+  getMyPurchases(@CurrentUser() user: AuthenticatedUser, @Query() query: PaginationDto) {
+    return this.marketplaceService.getMyPurchases(user.id, query);
+  }
+
   @Post('listings')
   createListing(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateListingDto) {
     return this.marketplaceService.createListing(user.id, dto);

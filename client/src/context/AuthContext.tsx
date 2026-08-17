@@ -67,6 +67,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void fetchProfile();
   }, [fetchProfile, pathname]);
 
+  useEffect(() => {
+    const clearExpiredSession = () => setUser(null);
+    window.addEventListener('kickit:unauthorized', clearExpiredSession);
+    return () => window.removeEventListener('kickit:unauthorized', clearExpiredSession);
+  }, []);
+
   const login = useCallback(async (email: string, password: string) => {
     setError(null);
     setIsLoading(true);

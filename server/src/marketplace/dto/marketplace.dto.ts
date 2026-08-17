@@ -11,6 +11,7 @@ import {
   Min,
 } from 'class-validator';
 import { PaginationDto } from '../../common/dto/pagination.dto';
+import { Type } from 'class-transformer';
 
 export class CreateListingDto {
   @IsString()
@@ -46,6 +47,25 @@ export class MarketplaceQueryDto extends PaginationDto {
   search?: string;
 
   @IsOptional()
-  @IsIn(['price_asc', 'price_desc', 'recent'])
-  sort?: 'price_asc' | 'price_desc' | 'recent';
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  minPrice?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  maxPrice?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  club?: string;
+
+  @IsOptional()
+  @IsIn(['price_asc', 'price_desc', 'recent', 'rarity_desc'])
+  sort?: 'price_asc' | 'price_desc' | 'recent' | 'rarity_desc';
 }
